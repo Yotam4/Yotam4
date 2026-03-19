@@ -9,6 +9,7 @@ if (!process.env.ANTHROPIC_API_KEY) {
 const express = require('express');
 const Anthropic = require('@anthropic-ai/sdk');
 const path = require('path');
+const rateLimit = require('express-rate-limit');
 
 const app = express();
 const client = new Anthropic();
@@ -19,6 +20,16 @@ class ValidationError extends Error {}
 
 app.use(express.json({ limit: '50kb' }));
 app.use(express.static(path.join(__dirname, 'public')));
+
+// 10 API calls per minute per IP — prevents cost abuse
+const apiLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests — please wait a minute and try again.' }
+});
+app.use('/api/', apiLimiter);
 
 const PARSE_SYSTEM_PROMPT = `You are a travel itinerary parser. Given a free-form text description of a trip or journey, extract and return a structured JSON object representing the trip steps.
 
@@ -127,6 +138,7 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+// Batch geocode (kept for compatibility)
 app.post('/api/geocode', async (req, res) => {
   const { locations } = req.body;
   if (!Array.isArray(locations) || locations.length === 0) {
@@ -146,11 +158,24 @@ app.post('/api/geocode', async (req, res) => {
       console.error(`Geocoding failed for "${loc}":`, err.message);
       results[loc] = { found: false };
     }
-    // Nominatim ToS: max 1 request per second
     if (i < uniqueLocs.length - 1) await sleep(1100);
   }
 
   res.json(results);
+});
+
+// Single-location geocode — used by the frontend for per-location progress updates
+app.post('/api/geocode-one', async (req, res) => {
+  const { location } = req.body;
+  if (!location || typeof location !== 'string' || !location.trim()) {
+    return res.status(400).json({ error: 'No location provided' });
+  }
+  try {
+    res.json(await geocodeLocation(location.trim()));
+  } catch (err) {
+    console.error(`Geocoding failed for "${location}":`, err.message);
+    res.json({ found: false });
+  }
 });
 
 const PORT = process.env.PORT || 3000;

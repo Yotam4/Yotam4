@@ -70,6 +70,22 @@ Frontend renders:
 
 ## API Endpoints
 
+### `POST /api/geocode-one`
+Resolve a single location name to lat/lng (used by the frontend for per-location progress updates).
+
+**Request:**
+```json
+{ "location": "Paris, France" }
+```
+
+**Response:**
+```json
+{ "lat": 48.8566, "lng": 2.3522, "found": true }
+```
+or `{ "found": false }` if not found.
+
+---
+
 ### `POST /api/parse-trip`
 Parse a free-speech trip description into structured data.
 
@@ -129,13 +145,18 @@ Resolve location names to lat/lng using OpenStreetMap Nominatim.
 - **renderGeneration counter** prevents stale animation frames from appearing when the user changes transport mode while a previous render is still animating.
 - **`TRANSPORT_OPTIONS_HTML`** is pre-computed once at startup; dropdown `selected` state is set via `select.value` after innerHTML assignment, not by per-step string building.
 
+## Rate Limiting
+
+The API endpoints are protected by `express-rate-limit`: 10 requests per minute per IP across all `/api/` routes. This prevents abuse of the Anthropic API quota.
+
 ## Known Limitations
 
 - **Transport mode inference:** When a trip description doesn't specify how to travel, Claude makes a reasonable guess (e.g., intercontinental = flight). This can be corrected per-leg using the dropdown in the UI.
 - **Obscure locations:** Very small towns or unusual place names may not geocode. A warning is shown for any that fail.
-- **Geocoding speed:** With Nominatim's 1 req/sec limit, a trip with 10 unique locations takes ~10 seconds to geocode.
-- **No persistence:** Trips are not saved. Refreshing the page clears everything.
+- **Geocoding speed:** With Nominatim's 1 req/sec limit, a trip with 10 unique locations takes ~11 seconds to geocode. Progress is shown per-location during this wait.
 - **Ground routes are straight lines:** Drive/train/ship legs are drawn as straight point-to-point lines, not actual road/rail/sea routes.
+- **Distance estimates are straight-line (haversine):** Shown per leg and as a total. Actual travel distance will be higher for ground transport.
+- **Duration estimates are approximate:** Based on assumed cruising speeds (flight 850 km/h, train 120 km/h, drive 90 km/h, ship 40 km/h, walk 5 km/h).
 
 ## Development
 
