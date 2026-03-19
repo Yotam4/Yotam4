@@ -112,7 +112,10 @@
       border-radius: 20px;
       color: var(--muted);
       font-size: 0.72rem;
-      padding: 3px 10px;
+      padding: 10px 12px;
+      min-height: 44px;
+      display: inline-flex;
+      align-items: center;
       cursor: pointer;
       transition: all 0.2s;
     }
@@ -155,8 +158,9 @@
       display: none;
       position: relative;
     }
-    .banner.error { background: #3d1a1a; border: 1px solid #7a2020; color: #f48a8a; display: block; }
-    .banner.warn  { background: #2d2210; border: 1px solid #6a4a10; color: #ffc166; display: block; }
+    .banner.error   { background: #3d1a1a; border: 1px solid #7a2020; color: #f48a8a; display: block; }
+    .banner.warn    { background: #2d2210; border: 1px solid #6a4a10; color: #ffc166; display: block; }
+    .banner.success { background: #1a3d1a; border: 1px solid #2a7a2a; color: #6fc96f; display: block; }
     .banner .close {
       position: absolute; top: 8px; right: 10px;
       cursor: pointer; opacity: 0.6; font-size: 1rem; line-height: 1;
@@ -263,6 +267,18 @@
     @keyframes spin { to { transform: rotate(360deg); } }
     .loading-text { color: var(--muted); font-size: 0.9rem; }
     .loading-sub { color: #3a4070; font-size: 0.78rem; }
+    .btn-cancel {
+      margin-top: 16px;
+      padding: 10px 20px;
+      min-height: 44px;
+      background: transparent;
+      border: 1px solid rgba(255,255,255,0.3);
+      color: rgba(255,255,255,0.7);
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.85rem;
+    }
+    .btn-cancel:hover { border-color: rgba(255,255,255,0.6); color: #fff; }
 
     /* Empty state */
     .empty-state { padding: 30px 16px; text-align: center; color: #3a4070; }
@@ -375,6 +391,7 @@
   <div class="spinner"></div>
   <div class="loading-text" id="loadingText">Parsing your trip...</div>
   <div class="loading-sub" id="loadingSub"></div>
+  <button id="cancelBtn" class="btn-cancel hidden" onclick="cancelParse()">Cancel</button>
 </div>
 
 <script>
@@ -412,6 +429,7 @@ let map, tripData, coordMap = {}, markers = [], lines = [], activeStep = -1;
 let legLines = [];       // legLines[i] = { line, weight, opacity } for step i
 let renderGeneration = 0; // incremented on each renderMap call to cancel stale animations
 let geocodeAbortController = null; // aborts in-flight geocode loop when a new parse starts
+let parseAbortController = null;
 
 // ── Map Init ─────────────────────────────────────────────────────────────────
 function initMap() {
@@ -469,10 +487,12 @@ function showLoading(text, sub = '') {
   document.getElementById('loadingText').textContent = text;
   document.getElementById('loadingSub').textContent = sub;
   document.getElementById('loading').classList.add('active');
+  document.getElementById('cancelBtn').classList.remove('hidden');
 }
 
 function hideLoading() {
   document.getElementById('loading').classList.remove('active');
+  document.getElementById('cancelBtn').classList.add('hidden');
 }
 
 function showError(msg) {
@@ -483,6 +503,16 @@ function showError(msg) {
 function showWarn(msg) {
   document.getElementById('warnMsg').textContent = msg;
   document.getElementById('warnBanner').className = 'banner warn';
+}
+
+function showSuccess(msg) {
+  document.getElementById('warnMsg').textContent = msg;
+  document.getElementById('warnBanner').className = 'banner success';
+}
+
+function cancelParse() {
+  parseAbortController?.abort();
+  geocodeAbortController?.abort();
 }
 
 function dismissBanner(id) {
@@ -688,11 +718,13 @@ function highlightLeg(i) {
 
 // ── Render steps ──────────────────────────────────────────────────────────────
 function getTotalDistanceLabel() {
-  const total = tripData.steps.reduce((sum, s) => {
+  let total = 0, skipped = 0;
+  tripData.steps.forEach(s => {
     const f = coordMap[s.from], t = coordMap[s.to];
-    return f?.found && t?.found ? sum + haversineKm(f.lat, f.lng, t.lat, t.lng) : sum;
-  }, 0);
-  return total > 0 ? ` &nbsp;·&nbsp; ${Math.round(total).toLocaleString()} km total` : '';
+    if (f?.found && t?.found) total += haversineKm(f.lat, f.lng, t.lat, t.lng);
+    else skipped++;
+  });
+  return total > 0 ? ` &nbsp;·&nbsp; ${Math.round(total).toLocaleString()} km total${skipped > 0 ? ' (partial)' : ''}` : '';
 }
 
 function renderSteps() {
@@ -779,6 +811,8 @@ async function parseTrip() {
   const btn = document.getElementById('parseBtn');
   btn.disabled = true;
 
+  parseAbortController = new AbortController();
+
   // Cancel any in-flight geocoding from a previous call
   if (geocodeAbortController) geocodeAbortController.abort();
   geocodeAbortController = new AbortController();
@@ -789,10 +823,19 @@ async function parseTrip() {
     const parseRes = await fetch('/api/parse-trip', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text })
+      body: JSON.stringify({ text }),
+      signal: parseAbortController.signal
     });
+    if (!parseRes.ok) {
+      if (parseRes.status === 429) {
+        const retryAfter = parseRes.headers.get('Retry-After');
+        const hint = retryAfter ? ` Try again in ${retryAfter} seconds.` : ' Please wait and try again.';
+        throw new Error(`Rate limit reached.${hint}`);
+      }
+      const parseData = await parseRes.json();
+      throw new Error(parseData.error || 'Failed to parse trip');
+    }
     const parseData = await parseRes.json();
-    if (!parseRes.ok) throw new Error(parseData.error || 'Failed to parse trip');
     tripData = parseData;
 
     const locs = [...new Set(tripData.steps.flatMap(s => [s.from, s.to]))];
@@ -810,8 +853,9 @@ async function parseTrip() {
       });
       if (!geoRes.ok) {
         if (geoRes.status === 429) {
-          const err = await geoRes.json().catch(() => ({}));
-          throw new Error(err.error || 'Rate limit exceeded — please wait and try again.');
+          const retryAfter = geoRes.headers.get('Retry-After');
+          const hint = retryAfter ? ` Try again in ${retryAfter} seconds.` : ' Please wait and try again.';
+          throw new Error(`Rate limit reached.${hint}`);
         }
         coordMap[locs[i]] = { found: false }; // transient error — treat as not found, continue
       } else {
@@ -854,7 +898,7 @@ function shareTrip() {
     const payload = btoa(encodeURIComponent(JSON.stringify({ tripData, coordMap })));
     const url = `${location.origin}${location.pathname}#trip=${payload}`;
     navigator.clipboard.writeText(url).then(() => {
-      showWarn('Link copied to clipboard! Send it to share your trip.');
+      showSuccess('Link copied to clipboard! Send it to share your trip.');
     }).catch(() => {
       // Clipboard API unavailable (non-https or blocked) — show the URL instead
       prompt('Copy this link to share your trip:', url);

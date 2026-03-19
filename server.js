@@ -60,7 +60,7 @@ Output format:
 function validateTripData(data) {
   if (!data || typeof data !== 'object') throw new ValidationError('Invalid response: not an object');
   if (typeof data.title !== 'string' || !data.title.trim()) throw new ValidationError('Missing or invalid "title"');
-  if (typeof data.summary !== 'string') throw new ValidationError('Missing "summary"');
+  if (typeof data.summary !== 'string' || !data.summary.trim()) throw new ValidationError('Missing "summary"');
   if (!Array.isArray(data.steps) || data.steps.length === 0) throw new ValidationError('No trip steps found');
 
   data.steps = data.steps.map((step, i) => {
@@ -96,19 +96,22 @@ app.post('/api/parse-trip', parseLimiter, async (req, res) => {
       messages: [{ role: 'user', content: text }]
     });
 
+    if (!message.content?.length || message.content[0].type !== 'text') {
+      return res.status(500).json({ error: 'AI returned an unexpected response. Please try again.' });
+    }
     const raw = message.content[0].text.trim();
     let parsed;
     try {
       parsed = JSON.parse(raw);
     } catch {
-      return res.status(500).json({ error: 'AI returned invalid JSON. Please try again.' });
+      return res.status(422).json({ error: 'AI returned invalid JSON. Please try again.' });
     }
 
     const validated = validateTripData(parsed);
     res.json(validated);
   } catch (err) {
     if (err instanceof ValidationError) {
-      return res.status(500).json({ error: 'AI response was malformed: ' + err.message });
+      return res.status(422).json({ error: 'AI response was malformed: ' + err.message });
     }
     console.error('Parse error:', err);
     return res.status(500).json({ error: 'Failed to parse trip description. Please try again.' });
@@ -135,8 +138,10 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+const geocodeCache = new Map();
+
 // Batch geocode (kept for compatibility)
-app.post('/api/geocode', async (req, res) => {
+app.post('/api/geocode', geocodeLimiter, async (req, res) => {
   const { locations } = req.body;
   if (!Array.isArray(locations) || locations.length === 0) {
     return res.status(400).json({ error: 'No locations provided' });
@@ -149,8 +154,14 @@ app.post('/api/geocode', async (req, res) => {
   const results = {};
   for (let i = 0; i < uniqueLocs.length; i++) {
     const loc = uniqueLocs[i];
+    if (geocodeCache.has(loc)) {
+      results[loc] = geocodeCache.get(loc);
+      continue;
+    }
     try {
-      results[loc] = await geocodeLocation(loc);
+      const result = await geocodeLocation(loc);
+      geocodeCache.set(loc, result);
+      results[loc] = result;
     } catch (err) {
       console.error(`Geocoding failed for "${loc}":`, err.message);
       results[loc] = { found: false };
@@ -167,9 +178,15 @@ app.post('/api/geocode-one', geocodeLimiter, async (req, res) => {
   if (!location || typeof location !== 'string' || !location.trim()) {
     return res.status(400).json({ error: 'No location provided' });
   }
+  const loc = location.trim();
+  if (geocodeCache.has(loc)) {
+    return res.json(geocodeCache.get(loc));
+  }
   try {
     await sleep(1100); // enforce Nominatim ToS server-side (1 req/sec max)
-    res.json(await geocodeLocation(location.trim()));
+    const result = await geocodeLocation(loc);
+    geocodeCache.set(loc, result);
+    res.json(result);
   } catch (err) {
     console.error(`Geocoding failed for "${location}":`, err.message);
     res.json({ found: false });
