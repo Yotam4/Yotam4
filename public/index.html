@@ -1,0 +1,607 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>World Trip Map Maker</title>
+
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <!-- Leaflet Ant Path (animated lines) -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --surface2: #22263a;
+      --accent: #6c8dfa;
+      --accent2: #f06292;
+      --text: #e8eaf6;
+      --muted: #7986cb;
+      --flight: #f06292;
+      --drive: #66bb6a;
+      --train: #ffa726;
+      --ship: #29b6f6;
+      --walk: #ab47bc;
+      --other: #78909c;
+    }
+
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    header {
+      padding: 14px 24px;
+      background: var(--surface);
+      border-bottom: 1px solid #2d3152;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-shrink: 0;
+    }
+    header .logo { font-size: 1.5rem; }
+    header h1 { font-size: 1.2rem; font-weight: 700; color: var(--accent); }
+    header p { font-size: 0.8rem; color: var(--muted); margin-top: 2px; }
+
+    .main {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    /* LEFT PANEL */
+    .panel {
+      width: 380px;
+      min-width: 320px;
+      display: flex;
+      flex-direction: column;
+      background: var(--surface);
+      border-right: 1px solid #2d3152;
+      overflow: hidden;
+    }
+
+    .input-area {
+      padding: 16px;
+      border-bottom: 1px solid #2d3152;
+      flex-shrink: 0;
+    }
+    .input-area label {
+      display: block;
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 8px;
+    }
+    textarea {
+      width: 100%;
+      background: var(--surface2);
+      border: 1px solid #2d3152;
+      border-radius: 8px;
+      color: var(--text);
+      font-size: 0.9rem;
+      line-height: 1.5;
+      padding: 10px 12px;
+      resize: none;
+      height: 130px;
+      transition: border-color 0.2s;
+      font-family: inherit;
+    }
+    textarea:focus { outline: none; border-color: var(--accent); }
+    textarea::placeholder { color: #4a5080; }
+
+    .examples {
+      margin-top: 8px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .example-btn {
+      background: var(--surface2);
+      border: 1px solid #2d3152;
+      border-radius: 20px;
+      color: var(--muted);
+      font-size: 0.72rem;
+      padding: 3px 10px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .example-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+    .btn-row { margin-top: 10px; display: flex; gap: 8px; }
+    button.primary {
+      flex: 1;
+      background: var(--accent);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      padding: 10px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.2s;
+    }
+    button.primary:disabled { opacity: 0.5; cursor: not-allowed; }
+    button.primary:hover:not(:disabled) { opacity: 0.85; }
+    button.secondary {
+      background: var(--surface2);
+      color: var(--muted);
+      border: 1px solid #2d3152;
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-size: 0.9rem;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    button.secondary:hover { border-color: var(--accent); color: var(--accent); }
+
+    /* STEPS */
+    .steps-area {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px;
+    }
+    .steps-area::-webkit-scrollbar { width: 4px; }
+    .steps-area::-webkit-scrollbar-thumb { background: #2d3152; border-radius: 2px; }
+
+    .trip-header {
+      padding: 10px 4px 14px;
+    }
+    .trip-header h2 { font-size: 1rem; color: var(--text); font-weight: 700; }
+    .trip-header p { font-size: 0.8rem; color: var(--muted); margin-top: 4px; line-height: 1.4; }
+
+    .step-card {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 6px;
+      cursor: pointer;
+      border-radius: 10px;
+      padding: 10px;
+      transition: background 0.15s;
+    }
+    .step-card:hover { background: var(--surface2); }
+    .step-card.active { background: var(--surface2); box-shadow: inset 2px 0 0 var(--accent); }
+
+    .step-icon {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1rem;
+      flex-shrink: 0;
+    }
+
+    .step-info { flex: 1; min-width: 0; }
+    .step-route {
+      font-size: 0.85rem;
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .step-meta {
+      font-size: 0.75rem;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+    .step-notes {
+      font-size: 0.75rem;
+      color: #5a6080;
+      margin-top: 4px;
+      font-style: italic;
+    }
+
+    .transport-badge {
+      font-size: 0.68rem;
+      font-weight: 700;
+      padding: 2px 7px;
+      border-radius: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      align-self: flex-start;
+      margin-top: 2px;
+    }
+
+    /* Legend */
+    .legend {
+      padding: 10px 12px;
+      border-top: 1px solid #2d3152;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 0.72rem;
+      color: var(--muted);
+    }
+    .legend-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+    }
+
+    /* MAP */
+    #map {
+      flex: 1;
+      background: #0d1117;
+    }
+
+    /* Loading overlay */
+    .loading-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(15,17,23,0.85);
+      z-index: 9999;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .loading-overlay.active { display: flex; }
+    .spinner {
+      width: 48px; height: 48px;
+      border: 3px solid #2d3152;
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .loading-text { color: var(--muted); font-size: 0.9rem; }
+
+    /* Empty state */
+    .empty-state {
+      padding: 30px 16px;
+      text-align: center;
+      color: #3a4070;
+    }
+    .empty-state .icon { font-size: 2.5rem; margin-bottom: 10px; }
+    .empty-state p { font-size: 0.85rem; line-height: 1.6; }
+
+    /* Responsive */
+    @media (max-width: 700px) {
+      .main { flex-direction: column; }
+      .panel { width: 100%; min-width: unset; border-right: none; border-bottom: 1px solid #2d3152; max-height: 50vh; }
+      #map { min-height: 300px; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo">🗺️</div>
+  <div>
+    <h1>World Trip Map Maker</h1>
+    <p>Describe your trip in plain text — we'll map it out for you</p>
+  </div>
+</header>
+
+<div class="main">
+  <!-- LEFT PANEL -->
+  <div class="panel">
+    <div class="input-area">
+      <label>Describe your trip</label>
+      <textarea id="tripInput" placeholder="e.g. I'm flying from New York to London, then taking a train to Paris. After that I'll drive to Barcelona and catch a flight to Tokyo via Dubai..."></textarea>
+
+      <div class="examples">
+        <button class="example-btn" onclick="loadExample(0)">🌍 World tour</button>
+        <button class="example-btn" onclick="loadExample(1)">🏝️ Island hop</button>
+        <button class="example-btn" onclick="loadExample(2)">🚗 Road trip</button>
+        <button class="example-btn" onclick="loadExample(3)">🚄 Rail journey</button>
+      </div>
+
+      <div class="btn-row">
+        <button class="primary" id="parseBtn" onclick="parseTrip()">✨ Generate Map</button>
+        <button class="secondary" onclick="clearAll()">Clear</button>
+      </div>
+    </div>
+
+    <div class="steps-area" id="stepsArea">
+      <div class="empty-state">
+        <div class="icon">✈️</div>
+        <p>Enter your trip description above and click <strong>Generate Map</strong> to create your interactive travel map.</p>
+      </div>
+    </div>
+
+    <div class="legend">
+      <div class="legend-item"><div class="legend-dot" style="background:var(--flight)"></div> Flight</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--drive)"></div> Drive</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--train)"></div> Train</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--ship)"></div> Ship</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--walk)"></div> Walk</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--other)"></div> Other</div>
+    </div>
+  </div>
+
+  <!-- MAP -->
+  <div id="map"></div>
+</div>
+
+<!-- Loading -->
+<div class="loading-overlay" id="loading">
+  <div class="spinner"></div>
+  <div class="loading-text" id="loadingText">Parsing your trip...</div>
+</div>
+
+<script>
+// ── Config ──────────────────────────────────────────────────────────────────
+const TRANSPORT_CONFIG = {
+  flight: { color: '#f06292', icon: '✈️', label: 'Flight', dashArray: '8,6', weight: 2.5 },
+  drive:  { color: '#66bb6a', icon: '🚗', label: 'Drive',  dashArray: null,  weight: 2.5 },
+  train:  { color: '#ffa726', icon: '🚄', label: 'Train',  dashArray: '12,4', weight: 2.5 },
+  ship:   { color: '#29b6f6', icon: '⛴️', label: 'Ship',   dashArray: '6,8', weight: 2.5 },
+  walk:   { color: '#ab47bc', icon: '🚶', label: 'Walk',   dashArray: '2,6', weight: 2 },
+  other:  { color: '#78909c', icon: '🚌', label: 'Other',  dashArray: '4,4', weight: 2 }
+};
+
+const EXAMPLES = [
+  "I'm starting in New York, flying to London, then taking a train to Paris. From Paris I'll rent a car and drive to Barcelona. Then I fly to Tokyo and finally take a train to Kyoto.",
+  "Starting in Sydney, I'll fly to Bali, then take a boat to the Gili Islands. Then fly to Singapore, then to the Maldives, and finally fly back home to Sydney.",
+  "I'm doing a classic US road trip: driving from Los Angeles to Las Vegas, then to the Grand Canyon, then to Denver, up to Yellowstone National Park, and finally to Seattle.",
+  "I'm taking the Trans-Siberian Railway from Moscow to Beijing. First a train from London to Moscow via Paris. Then the long train journey through Siberia, stopping in Yekaterinburg and Irkutsk, and finishing in Beijing."
+];
+
+// ── State ────────────────────────────────────────────────────────────────────
+let map, tripData, coordMap = {}, markers = [], lines = [], activeStep = -1;
+
+// ── Map Init ─────────────────────────────────────────────────────────────────
+function initMap() {
+  map = L.map('map', { zoomControl: true }).setView([20, 0], 2);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    attribution: '© OpenStreetMap, © CartoDB',
+    maxZoom: 19
+  }).addTo(map);
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+function loadExample(i) {
+  document.getElementById('tripInput').value = EXAMPLES[i];
+}
+
+function clearAll() {
+  document.getElementById('tripInput').value = '';
+  document.getElementById('stepsArea').innerHTML = `
+    <div class="empty-state">
+      <div class="icon">✈️</div>
+      <p>Enter your trip description above and click <strong>Generate Map</strong> to create your interactive travel map.</p>
+    </div>`;
+  clearMap();
+  tripData = null;
+  activeStep = -1;
+}
+
+function clearMap() {
+  markers.forEach(m => map.removeLayer(m));
+  lines.forEach(l => map.removeLayer(l));
+  markers = []; lines = [];
+}
+
+function showLoading(text) {
+  document.getElementById('loadingText').textContent = text;
+  document.getElementById('loading').classList.add('active');
+}
+
+function hideLoading() {
+  document.getElementById('loading').classList.remove('active');
+}
+
+// ── Great Circle Arc (for flights) ────────────────────────────────────────────
+function greatCirclePoints(lat1, lng1, lat2, lng2, n = 80) {
+  const toRad = d => d * Math.PI / 180;
+  const toDeg = r => r * 180 / Math.PI;
+  const φ1 = toRad(lat1), λ1 = toRad(lng1);
+  const φ2 = toRad(lat2), λ2 = toRad(lng2);
+  const d = 2 * Math.asin(Math.sqrt(
+    Math.sin((φ2 - φ1) / 2) ** 2 +
+    Math.cos(φ1) * Math.cos(φ2) * Math.sin((λ2 - λ1) / 2) ** 2
+  ));
+  if (d === 0) return [[lat1, lng1], [lat2, lng2]];
+  const pts = [];
+  for (let i = 0; i <= n; i++) {
+    const f = i / n;
+    const A = Math.sin((1 - f) * d) / Math.sin(d);
+    const B = Math.sin(f * d) / Math.sin(d);
+    const x = A * Math.cos(φ1) * Math.cos(λ1) + B * Math.cos(φ2) * Math.cos(λ2);
+    const y = A * Math.cos(φ1) * Math.sin(λ1) + B * Math.cos(φ2) * Math.sin(λ2);
+    const z = A * Math.sin(φ1) + B * Math.sin(φ2);
+    pts.push([toDeg(Math.atan2(z, Math.sqrt(x * x + y * y))), toDeg(Math.atan2(y, x))]);
+  }
+  return pts;
+}
+
+// ── Render map from trip data + coords ───────────────────────────────────────
+function renderMap() {
+  clearMap();
+  const bounds = [];
+
+  // Draw all lines first (beneath markers)
+  tripData.steps.forEach((step, i) => {
+    const fromCoord = coordMap[step.from];
+    const toCoord   = coordMap[step.to];
+    if (!fromCoord || !toCoord) return;
+
+    const cfg = TRANSPORT_CONFIG[step.transport] || TRANSPORT_CONFIG.other;
+    let pts;
+    if (step.transport === 'flight') {
+      pts = greatCirclePoints(fromCoord.lat, fromCoord.lng, toCoord.lat, toCoord.lng);
+    } else {
+      pts = [[fromCoord.lat, fromCoord.lng], [toCoord.lat, toCoord.lng]];
+    }
+
+    const line = L.polyline(pts, {
+      color: cfg.color,
+      weight: cfg.weight,
+      opacity: 0.75,
+      dashArray: cfg.dashArray
+    }).addTo(map);
+
+    // Arrowhead at midpoint
+    const mid = pts[Math.floor(pts.length / 2)];
+    const arrowMarker = L.circleMarker(mid, {
+      radius: 4,
+      color: cfg.color,
+      fillColor: cfg.color,
+      fillOpacity: 1,
+      weight: 0
+    }).addTo(map);
+
+    line.on('click', () => activateStep(i));
+    lines.push(line, arrowMarker);
+
+    bounds.push([fromCoord.lat, fromCoord.lng], [toCoord.lat, toCoord.lng]);
+  });
+
+  // Collect unique locations with step numbers
+  const locationSteps = {};
+  tripData.steps.forEach((step, i) => {
+    if (!locationSteps[step.from]) locationSteps[step.from] = [];
+    locationSteps[step.from].push({ index: i, role: 'from' });
+    if (!locationSteps[step.to]) locationSteps[step.to] = [];
+    locationSteps[step.to].push({ index: i, role: 'to' });
+  });
+
+  // Draw markers
+  const allLocations = [...new Set(tripData.steps.flatMap(s => [s.from, s.to]))];
+  allLocations.forEach((loc, idx) => {
+    const coord = coordMap[loc];
+    if (!coord) return;
+
+    const isStart = loc === tripData.steps[0]?.from;
+    const isEnd   = loc === tripData.steps[tripData.steps.length - 1]?.to;
+
+    const color = isStart ? '#6c8dfa' : isEnd ? '#f06292' : '#e8eaf6';
+    const size  = (isStart || isEnd) ? 10 : 7;
+    const label = isStart ? '🟢' : isEnd ? '🔴' : `${idx + 1}`;
+
+    const icon = L.divIcon({
+      html: `<div style="
+        background:${color};
+        width:${size * 2}px;height:${size * 2}px;
+        border-radius:50%;
+        border:2px solid #0f1117;
+        display:flex;align-items:center;justify-content:center;
+        font-size:${size * 0.9}px;font-weight:700;color:#0f1117;
+        box-shadow:0 0 6px ${color}88;
+      ">${isStart ? '▶' : isEnd ? '■' : ''}</div>`,
+      className: '',
+      iconSize: [size * 2, size * 2],
+      iconAnchor: [size, size]
+    });
+
+    const marker = L.marker([coord.lat, coord.lng], { icon })
+      .addTo(map)
+      .bindPopup(`<strong>${loc}</strong>`);
+    markers.push(marker);
+  });
+
+  if (bounds.length > 0) {
+    map.fitBounds(bounds, { padding: [40, 40] });
+  }
+}
+
+// ── Step cards ────────────────────────────────────────────────────────────────
+function renderSteps() {
+  const area = document.getElementById('stepsArea');
+  const cfg  = step => TRANSPORT_CONFIG[step.transport] || TRANSPORT_CONFIG.other;
+
+  area.innerHTML = `
+    <div class="trip-header">
+      <h2>${tripData.title}</h2>
+      <p>${tripData.summary}</p>
+    </div>
+    ${tripData.steps.map((step, i) => `
+      <div class="step-card" id="step-${i}" onclick="activateStep(${i})">
+        <div class="step-icon" style="background:${cfg(step).color}22;color:${cfg(step).color}">
+          ${cfg(step).icon}
+        </div>
+        <div class="step-info">
+          <div class="step-route">${step.from} → ${step.to}</div>
+          <div class="step-meta">Step ${i + 1} of ${tripData.steps.length}</div>
+          <span class="transport-badge" style="background:${cfg(step).color}22;color:${cfg(step).color}">
+            ${cfg(step).label}
+          </span>
+          ${step.notes ? `<div class="step-notes">${step.notes}</div>` : ''}
+        </div>
+      </div>
+    `).join('')}
+  `;
+}
+
+function activateStep(i) {
+  // Deactivate old
+  if (activeStep >= 0) {
+    document.getElementById(`step-${activeStep}`)?.classList.remove('active');
+  }
+  activeStep = i;
+  const card = document.getElementById(`step-${i}`);
+  if (card) {
+    card.classList.add('active');
+    card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  // Zoom map to this leg
+  const step = tripData.steps[i];
+  const from = coordMap[step.from];
+  const to   = coordMap[step.to];
+  if (from && to) {
+    map.fitBounds([[from.lat, from.lng], [to.lat, to.lng]], { padding: [60, 60], maxZoom: 8 });
+  }
+}
+
+// ── Main flow ─────────────────────────────────────────────────────────────────
+async function parseTrip() {
+  const text = document.getElementById('tripInput').value.trim();
+  if (!text) return;
+
+  const btn = document.getElementById('parseBtn');
+  btn.disabled = true;
+
+  try {
+    showLoading('Parsing your trip with AI...');
+    const parseRes = await fetch('/api/parse-trip', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text })
+    });
+    if (!parseRes.ok) throw new Error((await parseRes.json()).error);
+    tripData = await parseRes.json();
+
+    showLoading('Geocoding locations...');
+    const locs = [...new Set(tripData.steps.flatMap(s => [s.from, s.to]))];
+    const geoRes = await fetch('/api/geocode', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ locations: locs })
+    });
+    if (!geoRes.ok) throw new Error((await geoRes.json()).error);
+    coordMap = await geoRes.json();
+
+    renderSteps();
+    renderMap();
+  } catch (err) {
+    alert('Error: ' + err.message);
+  } finally {
+    hideLoading();
+    btn.disabled = false;
+  }
+}
+
+// ── Init ─────────────────────────────────────────────────────────────────────
+initMap();
+</script>
+</body>
+</html>
