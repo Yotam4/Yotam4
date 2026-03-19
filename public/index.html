@@ -309,6 +309,7 @@
       .main { flex-direction: row; }
       .panel { max-height: 100vh; width: 320px; }
     }
+    .hidden { display: none; }
   </style>
 </head>
 <body>
@@ -342,7 +343,7 @@
       <div class="btn-row">
         <button class="primary" id="parseBtn" onclick="parseTrip()">✨ Generate Map</button>
         <button class="secondary" onclick="clearAll()">Clear</button>
-        <button class="secondary" id="shareBtn" onclick="shareTrip()" style="display:none">🔗 Share</button>
+        <button class="secondary hidden" id="shareBtn" onclick="shareTrip()">🔗 Share</button>
       </div>
 
       <div class="banner" id="errorBanner">
@@ -410,6 +411,7 @@ const EXAMPLES = [
 let map, tripData, coordMap = {}, markers = [], lines = [], activeStep = -1;
 let legLines = [];       // legLines[i] = { line, weight, opacity } for step i
 let renderGeneration = 0; // incremented on each renderMap call to cancel stale animations
+let geocodeAbortController = null; // aborts in-flight geocode loop when a new parse starts
 
 // ── Map Init ─────────────────────────────────────────────────────────────────
 function initMap() {
@@ -446,7 +448,7 @@ function clearAll() {
   dismissBanner('errorBanner');
   dismissBanner('warnBanner');
   try { localStorage.removeItem('lastTrip'); } catch { /* ignore */ }
-  document.getElementById('shareBtn').style.display = 'none';
+  document.getElementById('shareBtn').classList.add('hidden');
   document.getElementById('stepsArea').innerHTML = `
     <div class="empty-state">
       <div class="icon">✈️</div>
@@ -685,6 +687,14 @@ function highlightLeg(i) {
 }
 
 // ── Render steps ──────────────────────────────────────────────────────────────
+function getTotalDistanceLabel() {
+  const total = tripData.steps.reduce((sum, s) => {
+    const f = coordMap[s.from], t = coordMap[s.to];
+    return f?.found && t?.found ? sum + haversineKm(f.lat, f.lng, t.lat, t.lng) : sum;
+  }, 0);
+  return total > 0 ? ` &nbsp;·&nbsp; ${Math.round(total).toLocaleString()} km total` : '';
+}
+
 function renderSteps() {
   const area = document.getElementById('stepsArea');
   const cfg  = t => TRANSPORT_CONFIG[t] || TRANSPORT_CONFIG.other;
@@ -693,13 +703,7 @@ function renderSteps() {
     <div class="trip-header">
       <h2>${esc(tripData.title)}</h2>
       <p>${esc(tripData.summary)}</p>
-      <span class="step-count">${tripData.steps.length} leg${tripData.steps.length !== 1 ? 's' : ''}${(() => {
-        const total = tripData.steps.reduce((sum, s) => {
-          const f = coordMap[s.from], t = coordMap[s.to];
-          return f?.found && t?.found ? sum + haversineKm(f.lat, f.lng, t.lat, t.lng) : sum;
-        }, 0);
-        return total > 0 ? ` &nbsp;·&nbsp; ${Math.round(total).toLocaleString()} km total` : '';
-      })()}</span>
+      <span class="step-count">${tripData.steps.length} leg${tripData.steps.length !== 1 ? 's' : ''}${getTotalDistanceLabel()}</span>
     </div>
     ${tripData.steps.map((step, i) => `
       <div class="step-card" id="step-${i}" onclick="activateStep(${i})">
@@ -775,6 +779,11 @@ async function parseTrip() {
   const btn = document.getElementById('parseBtn');
   btn.disabled = true;
 
+  // Cancel any in-flight geocoding from a previous call
+  if (geocodeAbortController) geocodeAbortController.abort();
+  geocodeAbortController = new AbortController();
+  const geocodeSignal = geocodeAbortController.signal;
+
   try {
     showLoading('🧠 AI is reading your trip...', 'Extracting locations and transport modes');
     const parseRes = await fetch('/api/parse-trip', {
@@ -796,26 +805,28 @@ async function parseTrip() {
       const geoRes = await fetch('/api/geocode-one', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ location: locs[i] })
+        body: JSON.stringify({ location: locs[i] }),
+        signal: geocodeSignal
       });
       if (!geoRes.ok) {
-        const err = await geoRes.json().catch(() => ({}));
-        throw new Error(err.error || 'Geocoding failed');
+        if (geoRes.status === 429) {
+          const err = await geoRes.json().catch(() => ({}));
+          throw new Error(err.error || 'Rate limit exceeded — please wait and try again.');
+        }
+        coordMap[locs[i]] = { found: false }; // transient error — treat as not found, continue
+      } else {
+        coordMap[locs[i]] = await geoRes.json();
       }
-      coordMap[locs[i]] = await geoRes.json();
-      // Nominatim ToS: respect 1 req/sec — the server enforces this, but we
-      // add a small client-side pause to avoid hammering too hard in bursts
-      if (i < locs.length - 1) await new Promise(r => setTimeout(r, 1150));
+      // The server enforces Nominatim's 1 req/sec, so no extra client delay needed
     }
 
     const notFound = locs.filter(l => !coordMap[l]?.found);
     if (notFound.length === locs.length) {
-      // Every single location failed — show a helpful error, not just a warning
       showError(
         `None of the locations could be found on the map. ` +
         `Try more specific names (e.g. "Paris, France" instead of "Paris").`
       );
-      renderSteps(); // still show the step cards so user can see what was parsed
+      renderSteps();
       return;
     }
     if (notFound.length > 0) {
@@ -825,8 +836,10 @@ async function parseTrip() {
     renderSteps();
     renderMap();
     saveTrip();
-    document.getElementById('shareBtn').style.display = '';
+    geocodeAbortController = null;
+    document.getElementById('shareBtn').classList.remove('hidden');
   } catch (err) {
+    if (err.name === 'AbortError') return; // superseded by a newer parseTrip call — silent
     showError(err.message);
   } finally {
     hideLoading();
@@ -876,10 +889,12 @@ function restoreTrip() {
     if (!saved) return;
     const { tripData: td, coordMap: cm } = JSON.parse(saved);
     if (!td?.steps?.length) return;
+    activeStep = -1;
     tripData = td;
     coordMap = cm;
     renderSteps();
     renderMap();
+    document.getElementById('shareBtn').classList.remove('hidden');
     showWarn('Restored your last trip. Generate a new one anytime.');
   } catch { /* corrupt data — ignore */ }
 }
@@ -891,7 +906,7 @@ updateCharCount();
 if (loadTripFromHash()) {
   renderSteps();
   renderMap();
-  document.getElementById('shareBtn').style.display = '';
+  document.getElementById('shareBtn').classList.remove('hidden');
 } else {
   restoreTrip();
 }

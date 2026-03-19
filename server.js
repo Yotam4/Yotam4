@@ -21,15 +21,11 @@ class ValidationError extends Error {}
 app.use(express.json({ limit: '50kb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
-// 10 API calls per minute per IP — prevents cost abuse
-const apiLimiter = rateLimit({
-  windowMs: 60_000,
-  max: 10,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'Too many requests — please wait a minute and try again.' }
-});
-app.use('/api/', apiLimiter);
+const RATE_LIMIT_MSG = { error: 'Too many requests — please wait a minute and try again.' };
+// Claude calls are expensive — strict limit
+const parseLimiter = rateLimit({ windowMs: 60_000, max: 5,  standardHeaders: true, legacyHeaders: false, message: RATE_LIMIT_MSG });
+// Nominatim is free — higher limit to accommodate per-location progress calls
+const geocodeLimiter = rateLimit({ windowMs: 60_000, max: 60, standardHeaders: true, legacyHeaders: false, message: RATE_LIMIT_MSG });
 
 const PARSE_SYSTEM_PROMPT = `You are a travel itinerary parser. Given a free-form text description of a trip or journey, extract and return a structured JSON object representing the trip steps.
 
@@ -83,7 +79,7 @@ function validateTripData(data) {
   return data;
 }
 
-app.post('/api/parse-trip', async (req, res) => {
+app.post('/api/parse-trip', parseLimiter, async (req, res) => {
   const { text } = req.body;
   if (!text || !text.trim()) {
     return res.status(400).json({ error: 'No trip description provided' });
@@ -115,7 +111,7 @@ app.post('/api/parse-trip', async (req, res) => {
       return res.status(500).json({ error: 'AI response was malformed: ' + err.message });
     }
     console.error('Parse error:', err);
-    res.status(500).json({ error: 'Failed to parse trip description. Please try again.' });
+    return res.status(500).json({ error: 'Failed to parse trip description. Please try again.' });
   }
 });
 
@@ -123,6 +119,7 @@ app.post('/api/parse-trip', async (req, res) => {
 async function geocodeLocation(location) {
   const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(location)}&format=json&limit=1`;
   const res = await fetch(url, {
+    signal: AbortSignal.timeout(5000),
     headers: {
       'User-Agent': 'World-Trip-Map-Maker/1.0 (https://github.com/world-trip-map-maker)',
       'Accept-Language': 'en'
@@ -165,12 +162,13 @@ app.post('/api/geocode', async (req, res) => {
 });
 
 // Single-location geocode — used by the frontend for per-location progress updates
-app.post('/api/geocode-one', async (req, res) => {
+app.post('/api/geocode-one', geocodeLimiter, async (req, res) => {
   const { location } = req.body;
   if (!location || typeof location !== 'string' || !location.trim()) {
     return res.status(400).json({ error: 'No location provided' });
   }
   try {
+    await sleep(1100); // enforce Nominatim ToS server-side (1 req/sec max)
     res.json(await geocodeLocation(location.trim()));
   } catch (err) {
     console.error(`Geocoding failed for "${location}":`, err.message);

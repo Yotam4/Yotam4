@@ -142,12 +142,24 @@ Resolve location names to lat/lng using OpenStreetMap Nominatim.
 
 - **`TRANSPORT_CONFIG`** is the single source of truth for transport metadata (color, icon, label, dash pattern, line weight, CSS animation class). The map legend, step card icons, dropdowns, and line styling all derive from it.
 - **`ValidationError`** class distinguishes AI schema failures from network/API errors in the parse endpoint — avoids fragile string matching.
-- **renderGeneration counter** prevents stale animation frames from appearing when the user changes transport mode while a previous render is still animating.
+- **`renderGeneration` counter** prevents stale animation frames from appearing when the user changes transport mode while a previous render is still animating.
 - **`TRANSPORT_OPTIONS_HTML`** is pre-computed once at startup; dropdown `selected` state is set via `select.value` after innerHTML assignment, not by per-step string building.
+- **`geocodeAbortController`** (module-level) ensures only one geocoding session is ever active. Starting a new parse aborts any in-flight geocode loop from the previous parse.
+- **`.hidden` CSS class** is the standard visibility toggle (not inline `style="display:none"`). Components call `classList.add/remove('hidden')`.
+- **`getTotalDistanceLabel()`** extracted as a named helper — keeps the `renderSteps()` template literal clean.
+- **`AbortSignal.timeout(5000)`** on every Nominatim fetch prevents indefinite hangs on server-side network issues.
 
 ## Rate Limiting
 
-The API endpoints are protected by `express-rate-limit`: 10 requests per minute per IP across all `/api/` routes. This prevents abuse of the Anthropic API quota.
+Two separate `express-rate-limit` instances are applied per-route to reflect their actual cost:
+
+| Route | Limiter | Limit | Rationale |
+|-------|---------|-------|-----------|
+| `POST /api/parse-trip` | `parseLimiter` | 5 / min | Claude API calls are expensive |
+| `POST /api/geocode-one` | `geocodeLimiter` | 60 / min | Nominatim is free; need headroom for per-location progress |
+| `POST /api/geocode` | none | — | Legacy batch endpoint; not called by current frontend |
+
+The server also enforces a 1100 ms delay inside `/api/geocode-one` before forwarding to Nominatim, so the ToS rate limit holds even when callers hit the endpoint directly.
 
 ## Known Limitations
 
