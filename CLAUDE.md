@@ -1,4 +1,4 @@
-# World Trip Map Maker
+# WanderMap
 
 An interactive web app that takes a free-speech description of a trip and renders it as a visual, step-by-step map — showing routes, destinations, and how you travel between them (flight, drive, train, ship, etc.).
 
@@ -134,7 +134,7 @@ Resolve location names to lat/lng using OpenStreetMap Nominatim.
 ## Nominatim Usage Notes
 
 - **Rate limit:** 1 request/second maximum — the server enforces this with 1.1s delays
-- **User-Agent:** Required by Nominatim ToS — set to `World-Trip-Map-Maker/1.0`
+- **User-Agent:** Required by Nominatim ToS — set to `WanderMap/1.0`
 - **No API key needed** — free public service by OpenStreetMap
 - **Accuracy:** Very high for cities and well-known places; may fail for obscure locations
 
@@ -183,7 +183,7 @@ For backend changes, `nodemon` will auto-restart. For frontend changes, just ref
 ## Project Structure
 
 ```
-world-trip-map-maker/
+wandermap/
 ├── server.js           # Express backend (parse + geocode endpoints)
 ├── package.json
 ├── .env.example        # Environment variable template

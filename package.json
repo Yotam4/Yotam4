@@ -1,7 +1,7 @@
 {
-  "name": "world-trip-map-maker",
+  "name": "wandermap",
   "version": "1.0.0",
-  "description": "Parse free-speech trip descriptions into interactive visual roadtrip maps",
+  "description": "Parse free-speech trip descriptions into interactive visual travel maps",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

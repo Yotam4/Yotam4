@@ -121,7 +121,7 @@ async function geocodeLocation(location) {
   const res = await fetch(url, {
     signal: AbortSignal.timeout(5000),
     headers: {
-      'User-Agent': 'World-Trip-Map-Maker/1.0 (https://github.com/world-trip-map-maker)',
+      'User-Agent': 'WanderMap/1.0 (https://github.com/wandermap)',
       'Accept-Language': 'en'
     }
   });
@@ -177,4 +177,4 @@ app.post('/api/geocode-one', geocodeLimiter, async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`World Trip Map Maker running on http://localhost:${PORT}`));
+app.listen(PORT, () => console.log(`WanderMap running on http://localhost:${PORT}`));
