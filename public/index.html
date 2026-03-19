@@ -367,6 +367,8 @@ const EXAMPLES = [
 
 // ── State ────────────────────────────────────────────────────────────────────
 let map, tripData, coordMap = {}, markers = [], lines = [], activeStep = -1;
+// Per-leg polyline refs for highlight/restore
+let legLines = [];  // legLines[i] = { line, arrow } for step i
 
 // ── Map Init ─────────────────────────────────────────────────────────────────
 function initMap() {
@@ -415,7 +417,7 @@ function clearAll() {
 function clearMap() {
   markers.forEach(m => map && map.removeLayer(m));
   lines.forEach(l => map && map.removeLayer(l));
-  markers = []; lines = [];
+  markers = []; lines = []; legLines = [];
 }
 
 function showLoading(text, sub = '') {
@@ -468,62 +470,133 @@ function greatCirclePoints(lat1, lng1, lat2, lng2, n = 80) {
   return pts;
 }
 
-// ── Render map ────────────────────────────────────────────────────────────────
-function renderMap() {
+// ── Direction arrow at a given bearing angle ──────────────────────────────────
+function bearingDeg(pts, frac = 0.65) {
+  const i = Math.max(1, Math.floor(pts.length * frac));
+  const [lat1, lng1] = pts[i - 1];
+  const [lat2, lng2] = pts[i];
+  // Screen-space bearing (lng = x, lat = y but map is flipped on lat)
+  return Math.atan2(lng2 - lng1, lat2 - lat1) * 180 / Math.PI;
+}
+
+function makeArrowIcon(color, angleDeg) {
+  return L.divIcon({
+    html: `<div style="
+      width:0;height:0;
+      border-left:6px solid transparent;
+      border-right:6px solid transparent;
+      border-bottom:12px solid ${color};
+      transform:rotate(${angleDeg}deg);
+      filter:drop-shadow(0 0 3px ${color}aa);
+    "></div>`,
+    className: '',
+    iconSize: [12, 12],
+    iconAnchor: [6, 6]
+  });
+}
+
+// ── Build visit-order map for numbering markers ────────────────────────────────
+function buildVisitOrder() {
+  const order = {};  // loc → first visit index (1-based)
+  let n = 0;
+  for (const step of tripData.steps) {
+    if (!(step.from in order)) order[step.from] = ++n;
+    if (!(step.to   in order)) order[step.to]   = ++n;
+  }
+  return order;
+}
+
+// ── Render map with sequential animation ──────────────────────────────────────
+async function renderMap() {
   clearMap();
+  legLines = [];
   const bounds = [];
 
-  tripData.steps.forEach((step, i) => {
-    const fromCoord = coordMap[step.from];
-    const toCoord   = coordMap[step.to];
-    if (!fromCoord?.found || !toCoord?.found) return;
-
-    const cfg = TRANSPORT_CONFIG[step.transport] || TRANSPORT_CONFIG.other;
-    const pts = step.transport === 'flight'
-      ? greatCirclePoints(fromCoord.lat, fromCoord.lng, toCoord.lat, toCoord.lng)
-      : [[fromCoord.lat, fromCoord.lng], [toCoord.lat, toCoord.lng]];
-
-    const line = L.polyline(pts, {
-      color: cfg.color, weight: cfg.weight, opacity: 0.75, dashArray: cfg.dashArray
-    }).addTo(map);
-
-    // Midpoint dot as directional indicator
-    const mid = pts[Math.floor(pts.length / 2)];
-    const dot = L.circleMarker(mid, {
-      radius: 4, color: cfg.color, fillColor: cfg.color, fillOpacity: 1, weight: 0
-    }).addTo(map);
-
-    line.on('click', () => activateStep(i));
-    lines.push(line, dot);
-    bounds.push([fromCoord.lat, fromCoord.lng], [toCoord.lat, toCoord.lng]);
+  // Collect bounds first so we can fitBounds immediately
+  tripData.steps.forEach(step => {
+    const f = coordMap[step.from], t = coordMap[step.to];
+    if (f?.found) bounds.push([f.lat, f.lng]);
+    if (t?.found) bounds.push([t.lat, t.lng]);
   });
+  if (bounds.length > 0) map.fitBounds(bounds, { padding: [40, 40] });
 
-  const allLocs = [...new Set(tripData.steps.flatMap(s => [s.from, s.to]))];
-  allLocs.forEach((loc, idx) => {
+  // Add numbered location markers (all at once — they're the reference points)
+  const visitOrder = buildVisitOrder();
+  const totalStops = Object.keys(visitOrder).length;
+  const allLocs = Object.keys(visitOrder);
+
+  allLocs.forEach(loc => {
     const coord = coordMap[loc];
     if (!coord?.found) return;
-    const isStart = loc === tripData.steps[0]?.from;
-    const isEnd   = loc === tripData.steps[tripData.steps.length - 1]?.to;
+    const num     = visitOrder[loc];
+    const isStart = num === 1;
+    const isEnd   = num === totalStops;
     const color   = isStart ? '#6c8dfa' : isEnd ? '#f06292' : '#e8eaf6';
-    const size    = (isStart || isEnd) ? 10 : 7;
+    const size    = (isStart || isEnd) ? 13 : 11;
 
     const icon = L.divIcon({
       html: `<div style="
-        background:${color};width:${size*2}px;height:${size*2}px;
-        border-radius:50%;border:2px solid #0f1117;
+        background:${color};
+        width:${size*2}px;height:${size*2}px;
+        border-radius:50%;
+        border:2px solid #0f1117;
         display:flex;align-items:center;justify-content:center;
-        font-size:${size*0.9}px;font-weight:700;color:#0f1117;
-        box-shadow:0 0 6px ${color}88;
-      ">${isStart ? '▶' : isEnd ? '■' : ''}</div>`,
+        font-size:${size * 0.8}px;font-weight:800;color:#0f1117;
+        box-shadow:0 0 8px ${color}99;
+        font-family:system-ui,sans-serif;
+      ">${num}</div>`,
       className: '', iconSize: [size*2, size*2], iconAnchor: [size, size]
     });
 
-    const marker = L.marker([coord.lat, coord.lng], { icon })
-      .addTo(map).bindPopup(`<strong>${loc}</strong>`);
+    const marker = L.marker([coord.lat, coord.lng], { icon, zIndexOffset: 1000 })
+      .addTo(map)
+      .bindTooltip(`<strong>${loc}</strong>`, { direction: 'top', offset: [0, -size - 4] });
     markers.push(marker);
   });
 
-  if (bounds.length > 0) map.fitBounds(bounds, { padding: [40, 40] });
+  // Animate legs one by one
+  for (let i = 0; i < tripData.steps.length; i++) {
+    const step = tripData.steps[i];
+    const fromCoord = coordMap[step.from];
+    const toCoord   = coordMap[step.to];
+    if (!fromCoord?.found || !toCoord?.found) { legLines.push(null); continue; }
+
+    // Stagger: delay 350ms per leg after the first
+    if (i > 0) await new Promise(r => setTimeout(r, 350));
+
+    const cfg = TRANSPORT_CONFIG[step.transport] || TRANSPORT_CONFIG.other;
+    const fullPts = step.transport === 'flight'
+      ? greatCirclePoints(fromCoord.lat, fromCoord.lng, toCoord.lat, toCoord.lng)
+      : [[fromCoord.lat, fromCoord.lng], [toCoord.lat, toCoord.lng]];
+
+    // Draw the line
+    const line = L.polyline(fullPts, {
+      color: cfg.color, weight: 3, opacity: 0.8, dashArray: cfg.dashArray
+    }).addTo(map);
+
+    // Direction arrow at 65% along the path
+    const arrowIdx = Math.max(1, Math.floor(fullPts.length * 0.65));
+    const arrowPt  = fullPts[arrowIdx];
+    const angle    = bearingDeg(fullPts, 0.65);
+    const arrow    = L.marker(arrowPt, { icon: makeArrowIcon(cfg.color, angle), zIndexOffset: 500 }).addTo(map);
+
+    line.on('click', () => activateStep(i));
+    lines.push(line, arrow);
+    legLines.push({ line, arrow, cfg, fullPts });
+  }
+}
+
+// ── Highlight the active leg ──────────────────────────────────────────────────
+function highlightLeg(i) {
+  // Reset all legs to normal style
+  legLines.forEach((leg, idx) => {
+    if (!leg) return;
+    leg.line.setStyle({ weight: 3, opacity: 0.8 });
+  });
+  // Highlight selected
+  if (i >= 0 && legLines[i]) {
+    legLines[i].line.setStyle({ weight: 5, opacity: 1 });
+  }
 }
 
 // ── Render steps ──────────────────────────────────────────────────────────────
@@ -582,6 +655,8 @@ function activateStep(i) {
   activeStep = i;
   const card = document.getElementById(`step-${i}`);
   if (card) { card.classList.add('active'); card.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }
+
+  highlightLeg(i);
 
   const step = tripData.steps[i];
   const from = coordMap[step.from];
