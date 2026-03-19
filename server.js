@@ -15,6 +15,8 @@ const client = new Anthropic();
 
 const VALID_TRANSPORTS = ['flight', 'drive', 'train', 'ship', 'walk', 'other'];
 
+class ValidationError extends Error {}
+
 app.use(express.json({ limit: '50kb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -49,16 +51,16 @@ Output format:
 }`;
 
 function validateTripData(data) {
-  if (!data || typeof data !== 'object') throw new Error('Invalid response: not an object');
-  if (typeof data.title !== 'string' || !data.title.trim()) throw new Error('Missing or invalid "title"');
-  if (typeof data.summary !== 'string') throw new Error('Missing "summary"');
-  if (!Array.isArray(data.steps) || data.steps.length === 0) throw new Error('No trip steps found');
+  if (!data || typeof data !== 'object') throw new ValidationError('Invalid response: not an object');
+  if (typeof data.title !== 'string' || !data.title.trim()) throw new ValidationError('Missing or invalid "title"');
+  if (typeof data.summary !== 'string') throw new ValidationError('Missing "summary"');
+  if (!Array.isArray(data.steps) || data.steps.length === 0) throw new ValidationError('No trip steps found');
 
   data.steps = data.steps.map((step, i) => {
     if (!step.from || typeof step.from !== 'string' || !step.from.trim())
-      throw new Error(`Step ${i + 1} missing "from" location`);
+      throw new ValidationError(`Step ${i + 1} missing "from" location`);
     if (!step.to || typeof step.to !== 'string' || !step.to.trim())
-      throw new Error(`Step ${i + 1} missing "to" location`);
+      throw new ValidationError(`Step ${i + 1} missing "to" location`);
     return {
       from: step.from.trim(),
       to: step.to.trim(),
@@ -98,7 +100,7 @@ app.post('/api/parse-trip', async (req, res) => {
     const validated = validateTripData(parsed);
     res.json(validated);
   } catch (err) {
-    if (err.message.startsWith('Step ') || err.message.startsWith('Missing') || err.message.startsWith('Invalid')) {
+    if (err instanceof ValidationError) {
       return res.status(500).json({ error: 'AI response was malformed: ' + err.message });
     }
     console.error('Parse error:', err);
@@ -134,9 +136,10 @@ app.post('/api/geocode', async (req, res) => {
     return res.status(400).json({ error: 'Too many locations (max 50)' });
   }
 
+  const uniqueLocs = [...new Set(locations.filter(l => typeof l === 'string' && l.trim()))];
   const results = {};
-  for (let i = 0; i < locations.length; i++) {
-    const loc = locations[i];
+  for (let i = 0; i < uniqueLocs.length; i++) {
+    const loc = uniqueLocs[i];
     try {
       results[loc] = await geocodeLocation(loc);
     } catch (err) {
@@ -144,7 +147,7 @@ app.post('/api/geocode', async (req, res) => {
       results[loc] = { found: false };
     }
     // Nominatim ToS: max 1 request per second
-    if (i < locations.length - 1) await sleep(1100);
+    if (i < uniqueLocs.length - 1) await sleep(1100);
   }
 
   res.json(results);

@@ -348,14 +348,7 @@
       </div>
     </div>
 
-    <div class="legend">
-      <div class="legend-item"><div class="legend-dot" style="background:var(--flight)"></div> Flight</div>
-      <div class="legend-item"><div class="legend-dot" style="background:var(--drive)"></div> Drive</div>
-      <div class="legend-item"><div class="legend-dot" style="background:var(--train)"></div> Train</div>
-      <div class="legend-item"><div class="legend-dot" style="background:var(--ship)"></div> Ship</div>
-      <div class="legend-item"><div class="legend-dot" style="background:var(--walk)"></div> Walk</div>
-      <div class="legend-item"><div class="legend-dot" style="background:var(--other)"></div> Other</div>
-    </div>
+    <div class="legend" id="legend"></div>
   </div>
 
   <!-- MAP -->
@@ -372,13 +365,18 @@
 <script>
 // ── Config ───────────────────────────────────────────────────────────────────
 const TRANSPORT_CONFIG = {
-  flight: { color: '#f06292', icon: '✈️', label: 'Flight', dashArray: '8,6',  weight: 2.5 },
-  drive:  { color: '#66bb6a', icon: '🚗', label: 'Drive',  dashArray: null,   weight: 2.5 },
-  train:  { color: '#ffa726', icon: '🚄', label: 'Train',  dashArray: '12,4', weight: 2.5 },
-  ship:   { color: '#29b6f6', icon: '⛴️', label: 'Ship',   dashArray: '6,8',  weight: 2.5 },
-  walk:   { color: '#ab47bc', icon: '🚶', label: 'Walk',   dashArray: '2,6',  weight: 2   },
-  other:  { color: '#78909c', icon: '🚌', label: 'Other',  dashArray: '4,4',  weight: 2   }
+  flight: { color: '#f06292', icon: '✈️', label: 'Flight', dashArray: '8,6',  weight: 2.5, pathClass: 'flight-path' },
+  drive:  { color: '#66bb6a', icon: '🚗', label: 'Drive',  dashArray: null,   weight: 2.5, pathClass: null },
+  train:  { color: '#ffa726', icon: '🚄', label: 'Train',  dashArray: '12,4', weight: 2.5, pathClass: 'train-path' },
+  ship:   { color: '#29b6f6', icon: '⛴️', label: 'Ship',   dashArray: '6,8',  weight: 2.5, pathClass: 'ship-path' },
+  walk:   { color: '#ab47bc', icon: '🚶', label: 'Walk',   dashArray: '2,6',  weight: 2,   pathClass: null },
+  other:  { color: '#78909c', icon: '🚌', label: 'Other',  dashArray: '4,4',  weight: 2,   pathClass: null }
 };
+
+// Pre-computed once — these options never change at runtime
+const TRANSPORT_OPTIONS_HTML = Object.entries(TRANSPORT_CONFIG)
+  .map(([k, v]) => `<option value="${k}">${v.icon} ${v.label}</option>`)
+  .join('');
 
 const EXAMPLES = [
   "I'm starting in New York, flying to London, then taking a train to Paris. From Paris I'll rent a car and drive to Barcelona. Then I fly to Tokyo and finally take a train to Kyoto.",
@@ -389,7 +387,7 @@ const EXAMPLES = [
 
 // ── State ────────────────────────────────────────────────────────────────────
 let map, tripData, coordMap = {}, markers = [], lines = [], activeStep = -1;
-let legLines = [];       // legLines[i] = { line, arrow } for step i
+let legLines = [];       // legLines[i] = { line, weight, opacity } for step i
 let renderGeneration = 0; // incremented on each renderMap call to cancel stale animations
 
 // ── Map Init ─────────────────────────────────────────────────────────────────
@@ -533,35 +531,20 @@ function buildVisitOrder() {
   return order;
 }
 
-// CSS class to apply to each transport type's SVG path for animation
-const TRANSPORT_PATH_CLASS = {
-  flight: 'flight-path',
-  train:  'train-path',
-  ship:   'ship-path',
-};
-
 // ── Render map with sequential animation ──────────────────────────────────────
 async function renderMap() {
   const gen = ++renderGeneration; // capture this render's generation
-  clearMap();
-  legLines = [];
+  clearMap(); // also resets legLines = []
   const bounds = [];
 
-  // Collect bounds so we can fitBounds immediately (before animation starts)
-  tripData.steps.forEach(step => {
-    const f = coordMap[step.from], t = coordMap[step.to];
-    if (f?.found) bounds.push([f.lat, f.lng]);
-    if (t?.found) bounds.push([t.lat, t.lng]);
-  });
-  if (bounds.length > 0) map.fitBounds(bounds, { padding: [40, 40] });
-
-  // Add numbered location markers up front — they're the reference anchors
+  // Build visit order and add numbered markers — collecting bounds in the same pass
   const visitOrder = buildVisitOrder();
   const totalStops = Object.keys(visitOrder).length;
 
   Object.keys(visitOrder).forEach(loc => {
     const coord = coordMap[loc];
     if (!coord?.found) return;
+    bounds.push([coord.lat, coord.lng]); // collect bounds here — no separate pass needed
     const num     = visitOrder[loc];
     const isStart = num === 1;
     const isEnd   = num === totalStops;
@@ -587,6 +570,7 @@ async function renderMap() {
       .bindTooltip(`<strong>${loc}</strong>`, { direction: 'top', offset: [0, -size - 4] });
     markers.push(marker);
   });
+  if (bounds.length > 0) map.fitBounds(bounds, { padding: [40, 40] });
 
   // Animate legs one by one — check generation before each leg to cancel stale renders
   for (let i = 0; i < tripData.steps.length; i++) {
@@ -615,11 +599,10 @@ async function renderMap() {
       color: cfg.color, weight, opacity, dashArray: cfg.dashArray
     }).addTo(map);
 
-    // Apply CSS animation class to the underlying SVG path element
-    const pathClass = TRANSPORT_PATH_CLASS[step.transport];
-    if (pathClass) {
+    // Apply CSS animation class to the underlying SVG path element (from cfg.pathClass)
+    if (cfg.pathClass) {
       const el = line.getElement();
-      if (el) el.classList.add(pathClass);
+      if (el) el.classList.add(cfg.pathClass);
     }
 
     // Direction arrow at 70% along the path (after midpoint, closer to destination)
@@ -629,7 +612,7 @@ async function renderMap() {
 
     line.on('click', () => activateStep(i));
     lines.push(line, arrow);
-    legLines.push({ line, arrow, cfg, weight, opacity });
+    legLines.push({ line, weight, opacity }); // arrow/cfg not read back — no need to store
   }
 }
 
@@ -651,10 +634,6 @@ function renderSteps() {
   const area = document.getElementById('stepsArea');
   const cfg  = t => TRANSPORT_CONFIG[t] || TRANSPORT_CONFIG.other;
 
-  const options = Object.entries(TRANSPORT_CONFIG)
-    .map(([k, v]) => `<option value="${k}">${v.icon} ${v.label}</option>`)
-    .join('');
-
   area.innerHTML = `
     <div class="trip-header">
       <h2>${tripData.title}</h2>
@@ -674,15 +653,17 @@ function renderSteps() {
           <select class="transport-select" id="transport-${i}"
             onclick="event.stopPropagation()"
             onchange="changeTransport(${i}, this.value)">
-            ${Object.entries(TRANSPORT_CONFIG).map(([k, v]) =>
-              `<option value="${k}"${k === step.transport ? ' selected' : ''}>${v.icon} ${v.label}</option>`
-            ).join('')}
+            ${TRANSPORT_OPTIONS_HTML}
           </select>
           ${step.notes ? `<div class="step-notes">${step.notes}</div>` : ''}
         </div>
       </div>
     `).join('')}
   `;
+  // Set each dropdown's selected value — TRANSPORT_OPTIONS_HTML has no `selected` attr
+  tripData.steps.forEach((step, i) => {
+    document.getElementById(`transport-${i}`).value = step.transport;
+  });
 }
 
 function changeTransport(i, newTransport) {
@@ -767,6 +748,10 @@ async function parseTrip() {
 // ── Init ──────────────────────────────────────────────────────────────────────
 initMap();
 updateCharCount();
+// Generate legend from TRANSPORT_CONFIG — single source of truth for colors/labels
+document.getElementById('legend').innerHTML = Object.entries(TRANSPORT_CONFIG)
+  .map(([, v]) => `<div class="legend-item"><div class="legend-dot" style="background:${v.color}"></div> ${v.label}</div>`)
+  .join('');
 </script>
 </body>
 </html>

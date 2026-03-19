@@ -59,12 +59,13 @@ POST /api/geocode
         │
         ▼
 Frontend renders:
-  - Great-circle arcs for flights (curved lines)
-  - Straight polylines for drive/train/ship/walk
-  - Color-coded by transport mode
+  - Great-circle arcs for flights (curved lines) with animated flowing dashes
+  - Straight polylines for drive/train/ship/walk (train/ship have slower dash animations)
+  - Color-coded + animated by transport mode (defined in TRANSPORT_CONFIG, single source of truth)
   - Numbered markers for each location
   - Clickable step cards that zoom the map
   - Per-step transport mode dropdown (editable after generation)
+  - Legend generated dynamically from TRANSPORT_CONFIG
 ```
 
 ## API Endpoints
@@ -112,7 +113,7 @@ Resolve location names to lat/lng using OpenStreetMap Nominatim.
 }
 ```
 
-**Limits:** Max 50 locations per request. Sequential requests with 1.1s delay (Nominatim ToS).
+**Limits:** Max 50 locations per request. Sequential requests with 1.1s delay (Nominatim ToS). Server deduplicates before querying.
 
 ## Nominatim Usage Notes
 
@@ -121,12 +122,20 @@ Resolve location names to lat/lng using OpenStreetMap Nominatim.
 - **No API key needed** — free public service by OpenStreetMap
 - **Accuracy:** Very high for cities and well-known places; may fail for obscure locations
 
+## Key Design Decisions
+
+- **`TRANSPORT_CONFIG`** is the single source of truth for transport metadata (color, icon, label, dash pattern, line weight, CSS animation class). The map legend, step card icons, dropdowns, and line styling all derive from it.
+- **`ValidationError`** class distinguishes AI schema failures from network/API errors in the parse endpoint — avoids fragile string matching.
+- **renderGeneration counter** prevents stale animation frames from appearing when the user changes transport mode while a previous render is still animating.
+- **`TRANSPORT_OPTIONS_HTML`** is pre-computed once at startup; dropdown `selected` state is set via `select.value` after innerHTML assignment, not by per-step string building.
+
 ## Known Limitations
 
 - **Transport mode inference:** When a trip description doesn't specify how to travel, Claude makes a reasonable guess (e.g., intercontinental = flight). This can be corrected per-leg using the dropdown in the UI.
 - **Obscure locations:** Very small towns or unusual place names may not geocode. A warning is shown for any that fail.
 - **Geocoding speed:** With Nominatim's 1 req/sec limit, a trip with 10 unique locations takes ~10 seconds to geocode.
 - **No persistence:** Trips are not saved. Refreshing the page clears everything.
+- **Ground routes are straight lines:** Drive/train/ship legs are drawn as straight point-to-point lines, not actual road/rail/sea routes.
 
 ## Development
 
