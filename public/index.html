@@ -269,6 +269,28 @@
     .empty-state .icon { font-size: 2.5rem; margin-bottom: 10px; }
     .empty-state p { font-size: 0.85rem; line-height: 1.6; }
 
+    /* Flight path animated dashes — conveys "in the air" motion */
+    @keyframes dashFlow {
+      to { stroke-dashoffset: -28; } /* one full 8+6+8+6 cycle */
+    }
+    .leaflet-overlay-pane svg .flight-path {
+      animation: dashFlow 1.2s linear infinite;
+    }
+    /* Train: slower rhythmic pulse */
+    @keyframes trainFlow {
+      to { stroke-dashoffset: -32; }
+    }
+    .leaflet-overlay-pane svg .train-path {
+      animation: trainFlow 1.8s linear infinite;
+    }
+    /* Ship: slow ocean swell */
+    @keyframes shipFlow {
+      to { stroke-dashoffset: -28; }
+    }
+    .leaflet-overlay-pane svg .ship-path {
+      animation: shipFlow 3s linear infinite;
+    }
+
     @media (max-width: 700px) {
       .main { flex-direction: column; }
       .panel { width: 100%; min-width: unset; border-right: none; border-bottom: 1px solid #2d3152; max-height: 50vh; }
@@ -367,8 +389,8 @@ const EXAMPLES = [
 
 // ── State ────────────────────────────────────────────────────────────────────
 let map, tripData, coordMap = {}, markers = [], lines = [], activeStep = -1;
-// Per-leg polyline refs for highlight/restore
-let legLines = [];  // legLines[i] = { line, arrow } for step i
+let legLines = [];       // legLines[i] = { line, arrow } for step i
+let renderGeneration = 0; // incremented on each renderMap call to cancel stale animations
 
 // ── Map Init ─────────────────────────────────────────────────────────────────
 function initMap() {
@@ -480,18 +502,23 @@ function bearingDeg(pts, frac = 0.65) {
 }
 
 function makeArrowIcon(color, angleDeg) {
+  // Outer container is 14×14 and centered — rotation pivot is the center of the icon.
+  // Inner triangle points UP (north) at 0°; rotate the container to face travel direction.
   return L.divIcon({
     html: `<div style="
-      width:0;height:0;
-      border-left:6px solid transparent;
-      border-right:6px solid transparent;
-      border-bottom:12px solid ${color};
+      width:14px;height:14px;
+      display:flex;align-items:center;justify-content:center;
       transform:rotate(${angleDeg}deg);
-      filter:drop-shadow(0 0 3px ${color}aa);
-    "></div>`,
+      filter:drop-shadow(0 0 3px ${color}bb);
+    "><div style="
+      width:0;height:0;
+      border-left:5px solid transparent;
+      border-right:5px solid transparent;
+      border-bottom:11px solid ${color};
+    "></div></div>`,
     className: '',
-    iconSize: [12, 12],
-    iconAnchor: [6, 6]
+    iconSize: [14, 14],
+    iconAnchor: [7, 7]
   });
 }
 
@@ -506,13 +533,21 @@ function buildVisitOrder() {
   return order;
 }
 
+// CSS class to apply to each transport type's SVG path for animation
+const TRANSPORT_PATH_CLASS = {
+  flight: 'flight-path',
+  train:  'train-path',
+  ship:   'ship-path',
+};
+
 // ── Render map with sequential animation ──────────────────────────────────────
 async function renderMap() {
+  const gen = ++renderGeneration; // capture this render's generation
   clearMap();
   legLines = [];
   const bounds = [];
 
-  // Collect bounds first so we can fitBounds immediately
+  // Collect bounds so we can fitBounds immediately (before animation starts)
   tripData.steps.forEach(step => {
     const f = coordMap[step.from], t = coordMap[step.to];
     if (f?.found) bounds.push([f.lat, f.lng]);
@@ -520,12 +555,11 @@ async function renderMap() {
   });
   if (bounds.length > 0) map.fitBounds(bounds, { padding: [40, 40] });
 
-  // Add numbered location markers (all at once — they're the reference points)
+  // Add numbered location markers up front — they're the reference anchors
   const visitOrder = buildVisitOrder();
   const totalStops = Object.keys(visitOrder).length;
-  const allLocs = Object.keys(visitOrder);
 
-  allLocs.forEach(loc => {
+  Object.keys(visitOrder).forEach(loc => {
     const coord = coordMap[loc];
     if (!coord?.found) return;
     const num     = visitOrder[loc];
@@ -554,48 +588,61 @@ async function renderMap() {
     markers.push(marker);
   });
 
-  // Animate legs one by one
+  // Animate legs one by one — check generation before each leg to cancel stale renders
   for (let i = 0; i < tripData.steps.length; i++) {
+    if (i > 0) {
+      await new Promise(r => setTimeout(r, 350));
+      if (renderGeneration !== gen) return; // a newer render started — abort
+    }
+
     const step = tripData.steps[i];
     const fromCoord = coordMap[step.from];
     const toCoord   = coordMap[step.to];
     if (!fromCoord?.found || !toCoord?.found) { legLines.push(null); continue; }
 
-    // Stagger: delay 350ms per leg after the first
-    if (i > 0) await new Promise(r => setTimeout(r, 350));
-
     const cfg = TRANSPORT_CONFIG[step.transport] || TRANSPORT_CONFIG.other;
-    const fullPts = step.transport === 'flight'
+    const isFlight = step.transport === 'flight';
+
+    const fullPts = isFlight
       ? greatCirclePoints(fromCoord.lat, fromCoord.lng, toCoord.lat, toCoord.lng)
       : [[fromCoord.lat, fromCoord.lng], [toCoord.lat, toCoord.lng]];
 
-    // Draw the line
+    // Flights are slightly thicker and more opaque to stand out
+    const weight  = isFlight ? 3.5 : 2.5;
+    const opacity = isFlight ? 0.9 : 0.75;
+
     const line = L.polyline(fullPts, {
-      color: cfg.color, weight: 3, opacity: 0.8, dashArray: cfg.dashArray
+      color: cfg.color, weight, opacity, dashArray: cfg.dashArray
     }).addTo(map);
 
-    // Direction arrow at 65% along the path
-    const arrowIdx = Math.max(1, Math.floor(fullPts.length * 0.65));
-    const arrowPt  = fullPts[arrowIdx];
-    const angle    = bearingDeg(fullPts, 0.65);
-    const arrow    = L.marker(arrowPt, { icon: makeArrowIcon(cfg.color, angle), zIndexOffset: 500 }).addTo(map);
+    // Apply CSS animation class to the underlying SVG path element
+    const pathClass = TRANSPORT_PATH_CLASS[step.transport];
+    if (pathClass) {
+      const el = line.getElement();
+      if (el) el.classList.add(pathClass);
+    }
+
+    // Direction arrow at 70% along the path (after midpoint, closer to destination)
+    const arrowPt = fullPts[Math.max(1, Math.floor(fullPts.length * 0.70))];
+    const angle   = bearingDeg(fullPts, 0.70);
+    const arrow   = L.marker(arrowPt, { icon: makeArrowIcon(cfg.color, angle), zIndexOffset: 500 }).addTo(map);
 
     line.on('click', () => activateStep(i));
     lines.push(line, arrow);
-    legLines.push({ line, arrow, cfg, fullPts });
+    legLines.push({ line, arrow, cfg, weight, opacity });
   }
 }
 
 // ── Highlight the active leg ──────────────────────────────────────────────────
 function highlightLeg(i) {
-  // Reset all legs to normal style
-  legLines.forEach((leg, idx) => {
+  // Reset all legs to their natural weight/opacity
+  legLines.forEach(leg => {
     if (!leg) return;
-    leg.line.setStyle({ weight: 3, opacity: 0.8 });
+    leg.line.setStyle({ weight: leg.weight, opacity: leg.opacity });
   });
-  // Highlight selected
+  // Thicken and brighten the selected leg
   if (i >= 0 && legLines[i]) {
-    legLines[i].line.setStyle({ weight: 5, opacity: 1 });
+    legLines[i].line.setStyle({ weight: legLines[i].weight + 2.5, opacity: 1 });
   }
 }
 
