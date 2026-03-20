@@ -195,7 +195,7 @@
       transition: background 0.15s;
     }
     .step-card:hover { background: var(--surface2); }
-    .step-card.active { background: var(--surface2); box-shadow: inset 2px 0 0 var(--accent); }
+    .step-card.active { background: #1e2235; box-shadow: inset 3px 0 0 var(--accent); }
 
     .step-icon {
       width: 36px; height: 36px;
@@ -215,6 +215,7 @@
     }
     .step-meta { font-size: 0.75rem; color: var(--muted); margin-top: 2px; }
     .step-notes { font-size: 0.75rem; color: #5a6080; margin-top: 4px; font-style: italic; }
+    .step-warn  { color: #f48a8a; }
 
     .transport-select {
       margin-top: 5px;
@@ -222,7 +223,7 @@
       border: 1px solid #2d3152;
       border-radius: 6px;
       color: var(--muted);
-      font-size: 0.75rem;
+      font-size: 0.8rem;
       padding: 2px 6px;
       cursor: pointer;
       transition: border-color 0.2s;
@@ -268,7 +269,6 @@
     .loading-text { color: var(--muted); font-size: 0.9rem; }
     .loading-sub { color: #3a4070; font-size: 0.78rem; }
     .btn-cancel {
-      margin-top: 16px;
       padding: 10px 20px;
       min-height: 44px;
       background: transparent;
@@ -717,6 +717,11 @@ function highlightLeg(i) {
 }
 
 // ── Render steps ──────────────────────────────────────────────────────────────
+function legStatsLabel(step) {
+  const s = legStats(step);
+  return s ? ` &nbsp;·&nbsp; ${s.dist} &nbsp;·&nbsp; ~${s.duration}` : '';
+}
+
 function getTotalDistanceLabel() {
   let total = 0, skipped = 0;
   tripData.steps.forEach(s => {
@@ -744,12 +749,9 @@ function renderSteps() {
         </div>
         <div class="step-info">
           <div class="step-route">${esc(step.from)} → ${esc(step.to)}</div>
-          <div class="step-meta">Leg ${i + 1} of ${tripData.steps.length}${(() => {
-            const s = legStats(step);
-            return s ? ` &nbsp;·&nbsp; ${s.dist} &nbsp;·&nbsp; ~${s.duration}` : '';
-          })()}
+          <div class="step-meta">Leg ${i + 1} of ${tripData.steps.length}${legStatsLabel(step)}
             ${!coordMap[step.from]?.found || !coordMap[step.to]?.found
-              ? ' <span style="color:#f48a8a">⚠ not on map</span>' : ''}</div>
+              ? ' <span class="step-warn">⚠ not on map</span>' : ''}</div>
           <select class="transport-select" id="transport-${i}"
             onclick="event.stopPropagation()"
             onchange="changeTransport(${i}, this.value)">
@@ -956,7 +958,7 @@ if (loadTripFromHash()) {
 }
 // Generate legend from TRANSPORT_CONFIG — single source of truth for colors/labels
 document.getElementById('legend').innerHTML = Object.entries(TRANSPORT_CONFIG)
-  .map(([, v]) => `<div class="legend-item"><div class="legend-dot" style="background:${v.color}"></div> ${v.label}</div>`)
+  .map(([, v]) => `<div class="legend-item"><div class="legend-dot" style="background:${v.color}"></div>${v.icon} ${v.label}</div>`)
   .join('');
 </script>
 </body>
