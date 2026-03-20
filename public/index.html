@@ -801,7 +801,7 @@ function changeTransport(i, newTransport) {
   tripData.steps[i].transport = newTransport;
   const cfg = TRANSPORT_CONFIG[newTransport] || TRANSPORT_CONFIG.other;
 
-  // Update only this step card's icon — no full re-render
+  // Update only this step card's icon and meta — no full re-render
   const card = document.getElementById(`step-${i}`);
   if (card) {
     const iconEl = card.querySelector('.step-icon');
@@ -809,6 +809,14 @@ function changeTransport(i, newTransport) {
       iconEl.style.background = cfg.color + '22';
       iconEl.style.color = cfg.color;
       iconEl.textContent = cfg.icon;
+    }
+    // Update per-leg duration (speed changed, so estimate changes)
+    const metaEl = card.querySelector('.step-meta');
+    if (metaEl) {
+      const step = tripData.steps[i];
+      const warn = (!coordMap[step.from]?.found || !coordMap[step.to]?.found)
+        ? ' <span class="step-warn">⚠ not on map</span>' : '';
+      metaEl.innerHTML = `Leg ${i + 1} of ${tripData.steps.length}${legStatsLabel(step)}${warn}`;
     }
   }
 
@@ -829,13 +837,16 @@ function changeTransport(i, newTransport) {
       if (cfg.pathClass) el.classList.add(cfg.pathClass);
     }
 
-    // Replace arrow marker with updated color
+    // Replace arrow marker with updated color; keep lines[] clean
     if (leg.arrow) {
+      const oldIdx = lines.indexOf(leg.arrow);
+      if (oldIdx >= 0) lines.splice(oldIdx, 1);
       map.removeLayer(leg.arrow);
       const flatPts = leg.line.getLatLngs().map(p => [p.lat, p.lng]);
       const arrowPt = flatPts[Math.max(1, Math.floor(flatPts.length * 0.70))];
       const angle   = bearingDeg(flatPts, 0.70);
       leg.arrow = L.marker(arrowPt, { icon: makeArrowIcon(cfg.color, angle), zIndexOffset: 500 }).addTo(map);
+      lines.push(leg.arrow);
     }
   }
 
