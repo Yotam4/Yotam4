@@ -66,6 +66,7 @@ Frontend renders:
   - Clickable step cards that zoom the map
   - Per-step transport mode dropdown (editable after generation)
   - Legend generated dynamically from TRANSPORT_CONFIG
+  - Cancel button in the loading overlay (aborts both the Claude fetch and the geocode loop)
 ```
 
 ## API Endpoints
