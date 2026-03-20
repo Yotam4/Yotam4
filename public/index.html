@@ -628,6 +628,11 @@ async function renderMap() {
   const visitOrder = buildVisitOrder();
   const totalStops = Object.keys(visitOrder).length;
 
+  // Map each location to the step it arrives on (used for marker click → activateStep)
+  const locationToArrivalStep = {};
+  tripData.steps.forEach((s, idx) => { locationToArrivalStep[s.to] = idx; });
+  if (tripData.steps.length > 0) locationToArrivalStep[tripData.steps[0].from] ??= 0;
+
   Object.keys(visitOrder).forEach(loc => {
     const coord = coordMap[loc];
     if (!coord?.found) return;
@@ -648,6 +653,7 @@ async function renderMap() {
         font-size:${size * 0.8}px;font-weight:800;color:#0f1117;
         box-shadow:0 0 8px ${color}99;
         font-family:system-ui,sans-serif;
+        cursor:pointer;
       ">${num}</div>`,
       className: '', iconSize: [size*2, size*2], iconAnchor: [size, size]
     });
@@ -655,6 +661,8 @@ async function renderMap() {
     const marker = L.marker([coord.lat, coord.lng], { icon, zIndexOffset: 1000 })
       .addTo(map)
       .bindTooltip(`<strong>${esc(loc)}</strong>`, { direction: 'top', offset: [0, -size - 4] });
+    const stepIdx = locationToArrivalStep[loc] ?? 0;
+    marker.on('click', () => activateStep(stepIdx));
     markers.push(marker);
   });
   if (bounds.length > 0) map.fitBounds(bounds, { padding: [40, 40] });
@@ -697,22 +705,37 @@ async function renderMap() {
     const angle   = bearingDeg(fullPts, 0.70);
     const arrow   = L.marker(arrowPt, { icon: makeArrowIcon(cfg.color, angle), zIndexOffset: 500 }).addTo(map);
 
-    line.on('click', () => activateStep(i));
+    line.on('click',     () => activateStep(i));
+    line.on('mouseover', () => hoverLeg(i));
+    line.on('mouseout',  () => unhoverLeg(i));
     lines.push(line, arrow);
-    legLines.push({ line, weight, opacity }); // arrow/cfg not read back — no need to store
+    legLines.push({ line, weight, opacity, arrow, cfg });
   }
+}
+
+// ── Hover effects for map lines ────────────────────────────────────────────────
+function hoverLeg(i) {
+  if (i === activeStep) return; // don't override active highlight
+  if (legLines[i]) legLines[i].line.setStyle({ weight: legLines[i].weight + 1, opacity: 0.95 });
+}
+
+function unhoverLeg(i) {
+  if (i === activeStep) return;
+  if (legLines[i]) legLines[i].line.setStyle({ weight: legLines[i].weight, opacity: legLines[i].opacity });
 }
 
 // ── Highlight the active leg ──────────────────────────────────────────────────
 function highlightLeg(i) {
-  // Reset all legs to their natural weight/opacity
+  // Reset all legs to their natural weight/opacity; dim arrows
   legLines.forEach(leg => {
     if (!leg) return;
     leg.line.setStyle({ weight: leg.weight, opacity: leg.opacity });
+    leg.arrow?.setOpacity(0.5);
   });
-  // Thicken and brighten the selected leg
+  // Thicken and brighten the selected leg and its arrow
   if (i >= 0 && legLines[i]) {
     legLines[i].line.setStyle({ weight: legLines[i].weight + 2.5, opacity: 1 });
+    legLines[i].arrow?.setOpacity(1.0);
   }
 }
 
@@ -723,13 +746,18 @@ function legStatsLabel(step) {
 }
 
 function getTotalDistanceLabel() {
-  let total = 0, skipped = 0;
+  let total = 0, totalHours = 0, skipped = 0;
   tripData.steps.forEach(s => {
     const f = coordMap[s.from], t = coordMap[s.to];
-    if (f?.found && t?.found) total += haversineKm(f.lat, f.lng, t.lat, t.lng);
-    else skipped++;
+    if (f?.found && t?.found) {
+      const km = haversineKm(f.lat, f.lng, t.lat, t.lng);
+      total += km;
+      totalHours += km / (TRANSPORT_SPEED[s.transport] || TRANSPORT_SPEED.other);
+    } else skipped++;
   });
-  return total > 0 ? ` &nbsp;·&nbsp; ${Math.round(total).toLocaleString()} km total${skipped > 0 ? ' (partial)' : ''}` : '';
+  if (total === 0) return '';
+  const partial = skipped > 0 ? ' (partial)' : '';
+  return ` &nbsp;·&nbsp; ${Math.round(total).toLocaleString()} km · ~${formatDuration(totalHours)} total${partial}`;
 }
 
 function renderSteps() {
@@ -771,12 +799,52 @@ function renderSteps() {
 function changeTransport(i, newTransport) {
   if (i < 0 || i >= tripData.steps.length) return;
   tripData.steps[i].transport = newTransport;
-  renderSteps();
-  renderMap();
-  // Re-apply active state
-  if (activeStep >= 0) {
-    document.getElementById(`step-${activeStep}`)?.classList.add('active');
+  const cfg = TRANSPORT_CONFIG[newTransport] || TRANSPORT_CONFIG.other;
+
+  // Update only this step card's icon — no full re-render
+  const card = document.getElementById(`step-${i}`);
+  if (card) {
+    const iconEl = card.querySelector('.step-icon');
+    if (iconEl) {
+      iconEl.style.background = cfg.color + '22';
+      iconEl.style.color = cfg.color;
+      iconEl.textContent = cfg.icon;
+    }
   }
+
+  // Update this leg's map line in-place — no re-animation
+  const leg = legLines[i];
+  if (leg) {
+    const newWeight  = newTransport === 'flight' ? 3.5 : 2.5;
+    const newOpacity = newTransport === 'flight' ? 0.9 : 0.75;
+    leg.line.setStyle({ color: cfg.color, dashArray: cfg.dashArray, weight: newWeight, opacity: newOpacity });
+    leg.weight  = newWeight;
+    leg.opacity = newOpacity;
+    leg.cfg     = cfg;
+
+    // Swap CSS animation class on the underlying SVG path element
+    const el = leg.line.getElement();
+    if (el) {
+      ['flight-path', 'train-path', 'ship-path'].forEach(c => el.classList.remove(c));
+      if (cfg.pathClass) el.classList.add(cfg.pathClass);
+    }
+
+    // Replace arrow marker with updated color
+    if (leg.arrow) {
+      map.removeLayer(leg.arrow);
+      const flatPts = leg.line.getLatLngs().map(p => [p.lat, p.lng]);
+      const arrowPt = flatPts[Math.max(1, Math.floor(flatPts.length * 0.70))];
+      const angle   = bearingDeg(flatPts, 0.70);
+      leg.arrow = L.marker(arrowPt, { icon: makeArrowIcon(cfg.color, angle), zIndexOffset: 500 }).addTo(map);
+    }
+  }
+
+  // Update step-count badge to reflect new total duration
+  const badge = document.querySelector('.step-count');
+  if (badge) badge.innerHTML =
+    `${tripData.steps.length} leg${tripData.steps.length !== 1 ? 's' : ''}${getTotalDistanceLabel()}`;
+
+  saveTrip();
 }
 
 function activateStep(i) {
@@ -897,7 +965,8 @@ async function parseTrip() {
 function shareTrip() {
   if (!tripData) return;
   try {
-    const payload = btoa(encodeURIComponent(JSON.stringify({ tripData, coordMap })));
+    const text = document.getElementById('tripInput').value;
+    const payload = btoa(encodeURIComponent(JSON.stringify({ tripData, coordMap, text })));
     const url = `${location.origin}${location.pathname}#trip=${payload}`;
     navigator.clipboard.writeText(url).then(() => {
       showSuccess('Link copied to clipboard! Send it to share your trip.');
@@ -912,10 +981,12 @@ function loadTripFromHash() {
   try {
     const hash = location.hash;
     if (!hash.startsWith('#trip=')) return false;
-    const { tripData: td, coordMap: cm } = JSON.parse(decodeURIComponent(atob(hash.slice(6))));
+    const { tripData: td, coordMap: cm, text } = JSON.parse(decodeURIComponent(atob(hash.slice(6))));
     if (!td?.steps?.length) return false;
     tripData = td;
     coordMap = cm;
+    document.getElementById('tripInput').value = text || '';
+    updateCharCount();
     // Clear the hash so sharing the page again generates a fresh link
     history.replaceState(null, '', location.pathname);
     return true;
@@ -925,7 +996,8 @@ function loadTripFromHash() {
 // ── Persistence ───────────────────────────────────────────────────────────────
 function saveTrip() {
   try {
-    localStorage.setItem('lastTrip', JSON.stringify({ tripData, coordMap }));
+    const text = document.getElementById('tripInput').value;
+    localStorage.setItem('lastTrip', JSON.stringify({ tripData, coordMap, text }));
   } catch { /* storage full or unavailable — silently skip */ }
 }
 
@@ -938,6 +1010,8 @@ function restoreTrip() {
     activeStep = -1;
     tripData = td;
     coordMap = cm;
+    document.getElementById('tripInput').value = td.text || '';
+    updateCharCount();
     renderSteps();
     renderMap();
     document.getElementById('shareBtn').classList.remove('hidden');
