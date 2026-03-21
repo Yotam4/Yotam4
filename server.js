@@ -27,7 +27,7 @@ const parseLimiter = rateLimit({ windowMs: 60_000, max: 5,  standardHeaders: tru
 // Nominatim is free — higher limit to accommodate per-location progress calls
 const geocodeLimiter = rateLimit({ windowMs: 60_000, max: 60, standardHeaders: true, legacyHeaders: false, message: RATE_LIMIT_MSG });
 
-const PARSE_SYSTEM_PROMPT = `You are a travel itinerary parser. Given a free-form text description of a trip or journey, extract and return a structured JSON object representing the trip steps.
+const PARSE_SYSTEM_PROMPT = `You are a travel itinerary parser. Given a free-form text description of a trip or journey, extract the trip steps and call the save_trip tool with the structured data.
 
 Rules:
 - Identify all locations/destinations mentioned in order
@@ -38,39 +38,35 @@ Rules:
   - "ship" for cruise, boat, ferry, sail
   - "walk" for walking, hiking, on foot
   - "other" for unspecified or other modes
-- For each step, provide: from location, to location, transport mode, and any notes
 - Each location should be a real, geocodable place name (city, country, landmark)
-- If transport mode is not specified, make a reasonable inference (e.g. intercontinental = flight, nearby cities = drive/train)
-- Return ONLY valid JSON, nothing else
+- If transport mode is not specified, make a reasonable inference (e.g. intercontinental = flight, nearby cities = drive/train)`;
 
-Output format:
-{
-  "title": "Trip title derived from the text",
-  "summary": "One-sentence summary of the trip",
-  "steps": [
-    {
-      "from": "City, Country",
-      "to": "City, Country",
-      "transport": "flight|drive|train|ship|walk|other",
-      "notes": "Optional extra detail about this leg"
-    }
-  ]
-}`;
-
-function extractJSON(text) {
-  // 1. Try direct parse
-  try { return JSON.parse(text); } catch {}
-  // 2. Strip markdown code fences
-  const fenced = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
-  try { return JSON.parse(fenced); } catch {}
-  // 3. Find the first { ... } block in the text
-  const start = text.indexOf('{');
-  const end = text.lastIndexOf('}');
-  if (start !== -1 && end !== -1 && end > start) {
-    try { return JSON.parse(text.slice(start, end + 1)); } catch {}
+const TRIP_TOOL = {
+  name: 'save_trip',
+  description: 'Save the structured trip data extracted from the user description.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      title:   { type: 'string', description: 'Short trip title' },
+      summary: { type: 'string', description: 'One-sentence summary of the trip' },
+      steps: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            from:      { type: 'string', description: 'Departure location' },
+            to:        { type: 'string', description: 'Arrival location' },
+            transport: { type: 'string', enum: ['flight','drive','train','ship','walk','other'] },
+            notes:     { type: 'string', description: 'Optional extra detail' }
+          },
+          required: ['from', 'to', 'transport', 'notes']
+        }
+      }
+    },
+    required: ['title', 'summary', 'steps']
   }
-  return null;
-}
+};
+
 
 function validateTripData(data) {
   if (!data || typeof data !== 'object') throw new ValidationError('Invalid response: not an object');
@@ -108,25 +104,26 @@ app.post('/api/parse-trip', parseLimiter, async (req, res) => {
       model: 'claude-sonnet-4-6',
       max_tokens: 2048,
       system: PARSE_SYSTEM_PROMPT,
+      tools: [TRIP_TOOL],
+      tool_choice: { type: 'tool', name: 'save_trip' },
       messages: [{ role: 'user', content: text }]
     });
 
-    if (!message.content?.length || message.content[0].type !== 'text') {
+    console.log('AI stop_reason:', message.stop_reason);
+    console.log('AI content types:', message.content.map(b => b.type));
+
+    const toolBlock = message.content.find(b => b.type === 'tool_use' && b.name === 'save_trip');
+    if (!toolBlock) {
+      console.error('No tool_use block in response:', JSON.stringify(message.content));
       return res.status(500).json({ error: 'AI returned an unexpected response. Please try again.' });
     }
-    const raw = message.content[0].text.trim();
-    console.log('RAW AI RESPONSE:', JSON.stringify(raw));
-    let parsed;
-    parsed = extractJSON(raw);
-    if (!parsed) {
-      console.log('JSON PARSE ERROR: could not extract JSON from response');
-      return res.status(422).json({ error: 'AI returned invalid JSON. Please try again.' });
-    }
 
-    const validated = validateTripData(parsed);
+    console.log('Tool input:', JSON.stringify(toolBlock.input));
+    const validated = validateTripData(toolBlock.input);
     res.json(validated);
   } catch (err) {
     if (err instanceof ValidationError) {
+      console.error('Validation error:', err.message);
       return res.status(422).json({ error: 'AI response was malformed: ' + err.message });
     }
     console.error('Parse error:', err);
