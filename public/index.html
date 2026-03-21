@@ -1016,12 +1016,12 @@ function restoreTrip() {
   try {
     const saved = localStorage.getItem('lastTrip');
     if (!saved) return;
-    const { tripData: td, coordMap: cm } = JSON.parse(saved);
+    const { tripData: td, coordMap: cm, text } = JSON.parse(saved);
     if (!td?.steps?.length) return;
     activeStep = -1;
     tripData = td;
     coordMap = cm;
-    document.getElementById('tripInput').value = td.text || '';
+    document.getElementById('tripInput').value = text || '';
     updateCharCount();
     renderSteps();
     renderMap();
