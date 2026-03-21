@@ -99,7 +99,9 @@ app.post('/api/parse-trip', parseLimiter, async (req, res) => {
     if (!message.content?.length || message.content[0].type !== 'text') {
       return res.status(500).json({ error: 'AI returned an unexpected response. Please try again.' });
     }
-    const raw = message.content[0].text.trim();
+    let raw = message.content[0].text.trim();
+    // Strip markdown code fences if present (e.g. ```json ... ```)
+    raw = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
     let parsed;
     try {
       parsed = JSON.parse(raw);
