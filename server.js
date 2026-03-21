@@ -100,12 +100,14 @@ app.post('/api/parse-trip', parseLimiter, async (req, res) => {
       return res.status(500).json({ error: 'AI returned an unexpected response. Please try again.' });
     }
     let raw = message.content[0].text.trim();
+    console.log('RAW AI RESPONSE:', JSON.stringify(raw));
     // Strip markdown code fences if present (e.g. ```json ... ```)
     raw = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
     let parsed;
     try {
       parsed = JSON.parse(raw);
-    } catch {
+    } catch (parseErr) {
+      console.log('JSON PARSE ERROR:', parseErr.message);
       return res.status(422).json({ error: 'AI returned invalid JSON. Please try again.' });
     }
 
