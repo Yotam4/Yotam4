@@ -57,6 +57,21 @@ Output format:
   ]
 }`;
 
+function extractJSON(text) {
+  // 1. Try direct parse
+  try { return JSON.parse(text); } catch {}
+  // 2. Strip markdown code fences
+  const fenced = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+  try { return JSON.parse(fenced); } catch {}
+  // 3. Find the first { ... } block in the text
+  const start = text.indexOf('{');
+  const end = text.lastIndexOf('}');
+  if (start !== -1 && end !== -1 && end > start) {
+    try { return JSON.parse(text.slice(start, end + 1)); } catch {}
+  }
+  return null;
+}
+
 function validateTripData(data) {
   if (!data || typeof data !== 'object') throw new ValidationError('Invalid response: not an object');
   if (typeof data.title !== 'string' || !data.title.trim()) throw new ValidationError('Missing or invalid "title"');
@@ -99,15 +114,12 @@ app.post('/api/parse-trip', parseLimiter, async (req, res) => {
     if (!message.content?.length || message.content[0].type !== 'text') {
       return res.status(500).json({ error: 'AI returned an unexpected response. Please try again.' });
     }
-    let raw = message.content[0].text.trim();
+    const raw = message.content[0].text.trim();
     console.log('RAW AI RESPONSE:', JSON.stringify(raw));
-    // Strip markdown code fences if present (e.g. ```json ... ```)
-    raw = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
     let parsed;
-    try {
-      parsed = JSON.parse(raw);
-    } catch (parseErr) {
-      console.log('JSON PARSE ERROR:', parseErr.message);
+    parsed = extractJSON(raw);
+    if (!parsed) {
+      console.log('JSON PARSE ERROR: could not extract JSON from response');
       return res.status(422).json({ error: 'AI returned invalid JSON. Please try again.' });
     }
 
