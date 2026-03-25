@@ -326,6 +326,148 @@
       .panel { max-height: 100vh; width: 320px; }
     }
     .hidden { display: none; }
+
+    /* ── Mode tabs ───────────────────────────────────────────────────────────── */
+    .mode-tabs {
+      display: flex;
+      gap: 3px;
+      background: var(--surface2);
+      border-radius: 10px;
+      padding: 3px;
+      margin-bottom: 12px;
+    }
+    .mode-tab {
+      flex: 1;
+      padding: 8px 6px;
+      border: none;
+      border-radius: 8px;
+      background: transparent;
+      color: var(--muted);
+      font-size: 0.82rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.18s;
+      min-height: 38px;
+    }
+    .mode-tab.active { background: var(--accent); color: #fff; }
+    .mode-tab:hover:not(.active) { color: var(--text); }
+
+    /* ── Stops builder ───────────────────────────────────────────────────────── */
+    .stops-builder { display: flex; flex-direction: column; }
+    .stop-wrap { position: relative; }
+    .stop-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--surface2);
+      border: 1px solid #2d3152;
+      border-radius: 10px;
+      padding: 10px 12px;
+      transition: border-color 0.18s;
+    }
+    .stop-row:focus-within { border-color: var(--accent); }
+    .stop-row.invalid { border-color: #7a2020; }
+    .stop-badge {
+      width: 24px; height: 24px;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 0.7rem; font-weight: 800;
+      color: #0f1117; flex-shrink: 0;
+    }
+    .stop-input {
+      flex: 1;
+      background: transparent;
+      border: none;
+      color: var(--text);
+      font-size: 0.88rem;
+      font-family: inherit;
+      min-width: 0;
+      padding: 0;
+    }
+    .stop-input:focus { outline: none; }
+    .stop-input::placeholder { color: #4a5080; }
+    .stop-actions { display: flex; gap: 2px; flex-shrink: 0; }
+    .stop-btn {
+      width: 26px; height: 26px;
+      border: none; border-radius: 6px;
+      background: transparent; color: var(--muted);
+      cursor: pointer; font-size: 0.78rem;
+      display: flex; align-items: center; justify-content: center;
+      transition: all 0.15s;
+    }
+    .stop-btn:hover:not(:disabled) { background: var(--bg); color: var(--text); }
+    .stop-btn.del:hover:not(:disabled) { color: #f48a8a; }
+    .stop-btn:disabled { opacity: 0.25; cursor: not-allowed; }
+
+    /* ── Transport connector ─────────────────────────────────────────────────── */
+    .transport-connector {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 0 4px 11px;
+    }
+    .connector-track {
+      width: 2px;
+      align-self: stretch;
+      background: #2d3152;
+      border-radius: 1px;
+      flex-shrink: 0;
+    }
+    .t-pills {
+      display: flex;
+      gap: 4px;
+      flex-wrap: wrap;
+    }
+    .t-pill {
+      border: 1px solid #2d3152;
+      border-radius: 16px;
+      background: var(--surface2);
+      color: var(--muted);
+      font-size: 0.75rem;
+      padding: 3px 9px;
+      cursor: pointer;
+      transition: all 0.15s;
+      display: flex;
+      align-items: center;
+      gap: 3px;
+    }
+    .t-pill:hover { border-color: #4a5580; color: var(--text); }
+    .t-pill.active { font-weight: 600; }
+
+    /* ── Autocomplete ────────────────────────────────────────────────────────── */
+    .autocomplete-list {
+      position: absolute;
+      top: calc(100% + 4px);
+      left: 0; right: 0;
+      background: var(--surface);
+      border: 1px solid #2d3152;
+      border-radius: 8px;
+      z-index: 9000;
+      overflow: hidden;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+    }
+    .ac-item {
+      padding: 8px 12px;
+      cursor: pointer;
+      transition: background 0.1s;
+    }
+    .ac-item:hover, .ac-item.focused { background: var(--surface2); }
+    .ac-name { font-size: 0.83rem; color: var(--text); }
+    .ac-sub  { font-size: 0.71rem; color: var(--muted); margin-top: 1px; }
+
+    .add-stop-btn {
+      width: 100%;
+      padding: 10px;
+      border: 1px dashed #2d3152;
+      border-radius: 10px;
+      background: transparent;
+      color: var(--muted);
+      font-size: 0.85rem;
+      cursor: pointer;
+      transition: all 0.2s;
+      margin-top: 6px;
+    }
+    .add-stop-btn:hover { border-color: var(--accent); color: var(--accent); }
   </style>
 </head>
 <body>
@@ -342,24 +484,43 @@
   <!-- LEFT PANEL -->
   <div class="panel">
     <div class="input-area">
-      <label>Describe your trip</label>
-      <textarea id="tripInput"
-        placeholder="e.g. I'm flying from New York to London, then taking a train to Paris. After that I'll drive to Barcelona and catch a flight to Tokyo via Dubai..."
-        oninput="updateCharCount()"
-        maxlength="5000"></textarea>
-      <div class="char-count" id="charCount">0 / 5000</div>
-
-      <div class="examples">
-        <button class="example-btn" onclick="loadExample(0)">🌍 World tour</button>
-        <button class="example-btn" onclick="loadExample(1)">🏝️ Island hop</button>
-        <button class="example-btn" onclick="loadExample(2)">🚗 Road trip</button>
-        <button class="example-btn" onclick="loadExample(3)">🚄 Rail journey</button>
+      <!-- Mode tabs -->
+      <div class="mode-tabs">
+        <button class="mode-tab active" id="tabAi" onclick="switchMode('ai')">✨ AI Generate</button>
+        <button class="mode-tab" id="tabManual" onclick="switchMode('manual')">📍 Manual Entry</button>
       </div>
 
-      <div class="btn-row">
-        <button class="primary" id="parseBtn" onclick="parseTrip()">✨ Generate Map</button>
-        <button class="secondary" onclick="clearAll()">Clear</button>
-        <button class="secondary hidden" id="shareBtn" onclick="shareTrip()">🔗 Share</button>
+      <!-- AI mode -->
+      <div id="aiMode">
+        <label>Describe your trip</label>
+        <textarea id="tripInput"
+          placeholder="e.g. I'm flying from New York to London, then taking a train to Paris. After that I'll drive to Barcelona and catch a flight to Tokyo via Dubai..."
+          oninput="updateCharCount()"
+          maxlength="5000"></textarea>
+        <div class="char-count" id="charCount">0 / 5000</div>
+
+        <div class="examples">
+          <button class="example-btn" onclick="loadExample(0)">🌍 World tour</button>
+          <button class="example-btn" onclick="loadExample(1)">🏝️ Island hop</button>
+          <button class="example-btn" onclick="loadExample(2)">🚗 Road trip</button>
+          <button class="example-btn" onclick="loadExample(3)">🚄 Rail journey</button>
+        </div>
+
+        <div class="btn-row">
+          <button class="primary" id="parseBtn" onclick="parseTrip()">✨ Generate Map</button>
+          <button class="secondary" onclick="clearAll()">Clear</button>
+          <button class="secondary hidden" id="shareBtn" onclick="shareTrip()">🔗 Share</button>
+        </div>
+      </div>
+
+      <!-- Manual Entry mode -->
+      <div id="manualMode" class="hidden">
+        <div class="stops-builder" id="stopsBuilder"></div>
+        <button class="add-stop-btn" onclick="addStop()">+ Add Stop</button>
+        <div class="btn-row" style="margin-top:10px;">
+          <button class="primary" id="drawBtn" onclick="buildManualTrip()">🗺️ Draw Map</button>
+          <button class="secondary" onclick="clearManual()">Clear</button>
+        </div>
       </div>
 
       <div class="banner" id="errorBanner">
@@ -1008,7 +1169,12 @@ function loadTripFromHash() {
 function saveTrip() {
   try {
     const text = document.getElementById('tripInput').value;
-    localStorage.setItem('lastTrip', JSON.stringify({ tripData, coordMap, text }));
+    localStorage.setItem('lastTrip', JSON.stringify({
+      tripData, coordMap, text,
+      mode: currentMode,
+      manualStops: currentMode === 'manual' ? manualStops.slice() : undefined,
+      manualTransports: currentMode === 'manual' ? manualTransports.slice() : undefined
+    }));
   } catch { /* storage full or unavailable — silently skip */ }
 }
 
@@ -1016,18 +1182,372 @@ function restoreTrip() {
   try {
     const saved = localStorage.getItem('lastTrip');
     if (!saved) return;
-    const { tripData: td, coordMap: cm, text } = JSON.parse(saved);
+    const { tripData: td, coordMap: cm, text, mode, manualStops: ms, manualTransports: mt } = JSON.parse(saved);
     if (!td?.steps?.length) return;
     activeStep = -1;
     tripData = td;
     coordMap = cm;
-    document.getElementById('tripInput').value = text || '';
-    updateCharCount();
+    if (mode === 'manual' && Array.isArray(ms) && ms.length >= 2) {
+      manualStops = ms;
+      manualTransports = Array.isArray(mt) ? mt : ['flight'];
+      switchMode('manual');
+    } else {
+      document.getElementById('tripInput').value = text || '';
+      updateCharCount();
+      switchMode('ai');
+    }
     renderSteps();
     renderMap();
-    document.getElementById('shareBtn').classList.remove('hidden');
+    if (mode !== 'manual') document.getElementById('shareBtn').classList.remove('hidden');
     showWarn('Restored your last trip. Generate a new one anytime.');
   } catch { /* corrupt data — ignore */ }
+}
+
+// ── Manual mode state ─────────────────────────────────────────────────────────
+let manualStops = ['', ''];
+let manualTransports = ['flight'];
+let currentMode = 'ai';
+
+function switchMode(mode) {
+  currentMode = mode;
+  document.getElementById('aiMode').classList.toggle('hidden', mode !== 'ai');
+  document.getElementById('manualMode').classList.toggle('hidden', mode !== 'manual');
+  document.getElementById('tabAi').classList.toggle('active', mode === 'ai');
+  document.getElementById('tabManual').classList.toggle('active', mode === 'manual');
+  // Share button only makes sense in AI mode (shareTrip reads the AI textarea)
+  if (mode === 'manual') document.getElementById('shareBtn').classList.add('hidden');
+  dismissBanner('errorBanner');
+  dismissBanner('warnBanner');
+  if (mode === 'manual') {
+    renderStopsBuilder();
+    // Update empty state prompt for manual mode if no trip is currently shown
+    if (!tripData) {
+      document.getElementById('stepsArea').innerHTML = `
+        <div class="empty-state">
+          <div class="icon">📍</div>
+          <p>Add your stops above and click <strong>Draw Map</strong> to create your interactive travel map.</p>
+        </div>`;
+    }
+  } else {
+    // Restore AI-mode empty state if no trip loaded
+    if (!tripData) {
+      document.getElementById('stepsArea').innerHTML = `
+        <div class="empty-state">
+          <div class="icon">✈️</div>
+          <p>Enter your trip description above and click <strong>Generate Map</strong> to create your interactive travel map.</p>
+        </div>`;
+    }
+  }
+}
+
+function renderStopsBuilder() {
+  // Cancel any pending autocomplete timers/requests before wiping the DOM
+  Object.keys(acTimers).forEach(k => { clearTimeout(acTimers[k]); delete acTimers[k]; });
+  Object.keys(acControllers).forEach(k => { acControllers[k].abort(); delete acControllers[k]; });
+
+  const container = document.getElementById('stopsBuilder');
+  const n = manualStops.length;
+  let html = '';
+  for (let i = 0; i < n; i++) {
+    // Badge color: first = accent blue, last = pink, middle = white
+    const badgeColor = i === 0 ? '#6c8dfa' : i === n - 1 ? '#f06292' : '#e8eaf6';
+    const canReorder = n > 2;
+    const canRemove  = n > 2;
+    html += `<div class="stop-wrap" id="stop-wrap-${i}">
+      <div class="stop-row" id="stop-row-${i}">
+        <div class="stop-badge" style="background:${badgeColor}">${i + 1}</div>
+        <input class="stop-input" id="stop-input-${i}" type="text"
+          placeholder="City or landmark, e.g. Paris, France"
+          value="${esc(manualStops[i])}"
+          autocomplete="off"
+          oninput="manualStops[${i}] = this.value; document.getElementById('stop-row-${i}').classList.remove('invalid');"
+        />
+        <div class="stop-actions">
+          ${canReorder ? `
+          <button class="stop-btn" title="Move up"
+            onclick="moveStop(${i}, -1)"
+            ${i === 0 ? 'disabled' : ''}>↑</button>
+          <button class="stop-btn" title="Move down"
+            onclick="moveStop(${i}, 1)"
+            ${i === n - 1 ? 'disabled' : ''}>↓</button>` : ''}
+          ${canRemove ? `<button class="stop-btn del" title="Remove stop"
+            onclick="removeStop(${i})">×</button>` : ''}
+        </div>
+      </div>
+    </div>`;
+    // Transport connector between stops i and i+1
+    if (i < n - 1) {
+      const activeTrans = manualTransports[i] || 'flight';
+      const pillsHtml = Object.entries(TRANSPORT_CONFIG).map(([key, cfg]) => {
+        const isActive = key === activeTrans;
+        const activeStyle = isActive
+          ? `style="border-color:${cfg.color};color:${cfg.color};background:${cfg.color}22;"`
+          : '';
+        return `<button class="t-pill${isActive ? ' active' : ''}" ${activeStyle}
+          onclick="setTransport(${i}, '${key}')">${cfg.icon} ${cfg.label}</button>`;
+      }).join('');
+      html += `<div class="transport-connector">
+        <div class="connector-track"></div>
+        <div class="t-pills">${pillsHtml}</div>
+      </div>`;
+    }
+  }
+  container.innerHTML = html;
+  // Attach autocomplete to each input after render
+  for (let i = 0; i < n; i++) {
+    const input = document.getElementById(`stop-input-${i}`);
+    if (input) attachAutocomplete(input, i);
+  }
+}
+
+function addStop() {
+  manualStops.push('');
+  manualTransports.push('other');
+  renderStopsBuilder();
+}
+
+function removeStop(i) {
+  if (manualStops.length <= 2) return;
+  manualStops.splice(i, 1);
+  manualTransports.splice(Math.min(i, manualTransports.length - 1), 1);
+  renderStopsBuilder();
+}
+
+function moveStop(i, dir) {
+  const j = i + dir;
+  if (j < 0 || j >= manualStops.length) return;
+  // Swap stops; transports stay in their slot (they belong to legs, not stops)
+  [manualStops[i], manualStops[j]] = [manualStops[j], manualStops[i]];
+  renderStopsBuilder();
+}
+
+function setTransport(i, t) {
+  manualTransports[i] = t;
+  renderStopsBuilder();
+}
+
+function clearManual() {
+  manualStops = ['', ''];
+  manualTransports = ['flight'];
+  renderStopsBuilder();
+  dismissBanner('errorBanner');
+  dismissBanner('warnBanner');
+  try { localStorage.removeItem('lastTrip'); } catch { /* ignore */ }
+  document.getElementById('stepsArea').innerHTML = `
+    <div class="empty-state">
+      <div class="icon">✈️</div>
+      <p>Add your stops above and click <strong>Draw Map</strong> to create your interactive travel map.</p>
+    </div>`;
+  clearMap();
+  tripData = null;
+  activeStep = -1;
+}
+
+// ── Autocomplete via Photon (OSM-based, CORS-friendly) ────────────────────────
+const acTimers = {};
+const acControllers = {};
+
+async function fetchSuggestions(query, signal) {
+  const timeoutSignal = AbortSignal.timeout(5000);
+  const combinedSignal = signal
+    ? (AbortSignal.any ? AbortSignal.any([signal, timeoutSignal]) : signal)
+    : timeoutSignal;
+  const res = await fetch(
+    `https://photon.komoot.io/api/?q=${encodeURIComponent(query)}&limit=5&lang=en`,
+    { signal: combinedSignal }
+  );
+  const data = await res.json();
+  return data.features.map(f => {
+    const p = f.properties;
+    const parts = [p.name, p.city || p.town || p.village, p.country].filter(Boolean);
+    // Deduplicate consecutive identical parts
+    const deduped = parts.filter((v, idx) => v !== parts[idx - 1]);
+    const name = deduped.join(', ');
+    const sub  = p.state ? `${p.state}, ${p.country || ''}` : (p.country || '');
+    return { name, sub };
+  });
+}
+
+function closeAllAutocompletes(exceptIdx = -1) {
+  document.querySelectorAll('.autocomplete-list').forEach(el => {
+    const idx = parseInt(el.dataset.idx, 10);
+    if (idx !== exceptIdx) el.remove();
+  });
+}
+
+function attachAutocomplete(input, idx) {
+  input.addEventListener('input', () => {
+    clearTimeout(acTimers[idx]);
+    acTimers[idx] = setTimeout(async () => {
+      const q = input.value.trim();
+      if (q.length < 2) { closeAllAutocompletes(-1); return; }
+      // Cancel previous request for this index
+      if (acControllers[idx]) acControllers[idx].abort();
+      acControllers[idx] = new AbortController();
+      const signal = acControllers[idx].signal;
+      try {
+        const suggestions = await fetchSuggestions(q, signal);
+        showAutocomplete(input, idx, suggestions);
+      } catch { /* network error or abort — ignore */ }
+    }, 400);
+  });
+
+  input.addEventListener('keydown', e => {
+    const list = document.getElementById(`ac-list-${idx}`);
+    if (!list) return;
+    const items = list.querySelectorAll('.ac-item');
+    const focused = list.querySelector('.ac-item.focused');
+    let focusedIdx = focused ? [...items].indexOf(focused) : -1;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      focusedIdx = Math.min(focusedIdx + 1, items.length - 1);
+      items.forEach((it, i) => it.classList.toggle('focused', i === focusedIdx));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      focusedIdx = Math.max(focusedIdx - 1, 0);
+      items.forEach((it, i) => it.classList.toggle('focused', i === focusedIdx));
+    } else if (e.key === 'Enter') {
+      if (focused) { e.preventDefault(); focused.click(); }
+    } else if (e.key === 'Escape') {
+      list.remove();
+    }
+  });
+
+  input.addEventListener('blur', () => {
+    // Delay so click on ac-item fires first
+    setTimeout(() => {
+      const list = document.getElementById(`ac-list-${idx}`);
+      if (list) list.remove();
+    }, 150);
+  });
+}
+
+function showAutocomplete(input, idx, suggestions) {
+  // Remove any existing list for this input
+  const existing = document.getElementById(`ac-list-${idx}`);
+  if (existing) existing.remove();
+  if (!suggestions.length) return;
+
+  const wrap = document.getElementById(`stop-wrap-${idx}`);
+  if (!wrap) return;
+
+  const list = document.createElement('div');
+  list.className = 'autocomplete-list';
+  list.id = `ac-list-${idx}`;
+  list.dataset.idx = idx;
+
+  suggestions.forEach(s => {
+    const item = document.createElement('div');
+    item.className = 'ac-item';
+    item.innerHTML = `<div class="ac-name">${esc(s.name)}</div>${s.sub ? `<div class="ac-sub">${esc(s.sub)}</div>` : ''}`;
+    item.addEventListener('mousedown', e => {
+      e.preventDefault(); // prevent blur on input
+      input.value = s.name;
+      manualStops[idx] = s.name;
+      list.remove();
+      // Remove invalid highlight if present
+      document.getElementById(`stop-row-${idx}`)?.classList.remove('invalid');
+    });
+    list.appendChild(item);
+  });
+
+  wrap.appendChild(list);
+  closeAllAutocompletes(idx);
+}
+
+// ── Build and render a manual trip ────────────────────────────────────────────
+async function buildManualTrip() {
+  // Validate: need at least 2 stops to form a trip
+  if (manualStops.length < 2) {
+    showError('Add at least 2 stops to draw a map.');
+    return;
+  }
+  // Validate: all stops must have non-empty text
+  let valid = true;
+  manualStops.forEach((loc, i) => {
+    const row = document.getElementById(`stop-row-${i}`);
+    if (!loc.trim()) {
+      if (row) row.classList.add('invalid');
+      valid = false;
+    }
+  });
+  if (!valid) {
+    showError('Please fill in all stop locations before drawing the map.');
+    return;
+  }
+
+  dismissBanner('errorBanner');
+  dismissBanner('warnBanner');
+
+  const drawBtn = document.getElementById('drawBtn');
+  if (drawBtn) drawBtn.disabled = true;
+
+  // Build tripData from manual stops
+  tripData = {
+    title: `${manualStops[0].trim()} → ${manualStops[manualStops.length - 1].trim()}`,
+    summary: `A ${manualStops.length}-stop trip from ${manualStops[0].trim()} to ${manualStops[manualStops.length - 1].trim()}.`,
+    steps: manualStops.slice(0, -1).map((s, i) => ({
+      from: s.trim(),
+      to: manualStops[i + 1].trim(),
+      transport: manualTransports[i] || 'other',
+      notes: ''
+    }))
+  };
+
+  // Geocode each unique location using /api/geocode-one
+  if (geocodeAbortController) geocodeAbortController.abort();
+  geocodeAbortController = new AbortController();
+  const geocodeSignal = geocodeAbortController.signal;
+
+  const locs = [...new Set(tripData.steps.flatMap(s => [s.from, s.to]))];
+  coordMap = {};
+
+  try {
+    for (let i = 0; i < locs.length; i++) {
+      showLoading(`📍 Finding location ${i + 1} of ${locs.length}…`, locs[i]);
+      const geoRes = await fetch('/api/geocode-one', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ location: locs[i] }),
+        signal: geocodeSignal
+      });
+      if (!geoRes.ok) {
+        if (geoRes.status === 429) {
+          const retryAfter = geoRes.headers.get('Retry-After');
+          const hint = retryAfter ? ` Try again in ${retryAfter} seconds.` : ' Please wait and try again.';
+          throw new Error(`Rate limit reached.${hint}`);
+        }
+        coordMap[locs[i]] = { found: false };
+      } else {
+        coordMap[locs[i]] = await geoRes.json();
+      }
+    }
+
+    const notFound = locs.filter(l => !coordMap[l]?.found);
+    if (notFound.length === locs.length) {
+      showError(
+        'None of the locations could be found on the map. ' +
+        'Try more specific names (e.g. "Paris, France" instead of "Paris").'
+      );
+      renderSteps();
+      return;
+    }
+    if (notFound.length > 0) {
+      showWarn(`Could not locate: ${notFound.join(', ')}. Those legs are hidden from the map.`);
+    }
+
+    renderSteps();
+    renderMap();
+    saveTrip();
+    geocodeAbortController = null;
+    // Share is AI-mode only (shareTrip reads the AI textarea); keep it hidden in manual mode
+  } catch (err) {
+    if (err.name === 'AbortError') return;
+    showError(err.message);
+  } finally {
+    hideLoading();
+    if (drawBtn) drawBtn.disabled = false;
+  }
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
